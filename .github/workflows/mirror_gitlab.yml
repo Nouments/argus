@@ -8,17 +8,25 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Mirror GitHub to GitLab
+      - name: Checkout GitHub
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Configure GitLab remote
         env:
           GITLAB_TOKEN: ${{ secrets.GITLAB_TOKEN }}
         run: |
-          git clone --mirror \
-            "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" \
-            mirror.git
-
-          cd mirror.git
-
           git remote add gitlab \
             "https://oauth2:${GITLAB_TOKEN}@gitlab.com/Nouments/argus.git"
 
-          git push --mirror gitlab
+      - name: Sync branches
+        run: |
+          git push gitlab \
+            '+refs/heads/*:refs/heads/*'
+
+      - name: Sync tags
+        run: |
+          git push gitlab \
+            '+refs/tags/*:refs/tags/*'
