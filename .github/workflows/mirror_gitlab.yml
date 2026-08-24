@@ -1,0 +1,32 @@
+name: Mirror GitHub to GitLab
+
+on:
+  push:
+
+jobs:
+  mirror:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout GitHub repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Add GitLab remote
+        env:
+          GITLAB_TOKEN: ${{ secrets.GITLAB_TOKEN }}
+        run: |
+          git remote add gitlab \
+            "https://oauth2:${GITLAB_TOKEN}@gitlab.com/Nouments/argus.git"
+
+      - name: Synchronize branches
+        run: |
+          git push gitlab \
+            '+refs/heads/*:refs/heads/*'
+
+      - name: Synchronize tags
+        run: |
+          git push gitlab \
+            '+refs/tags/*:refs/tags/*'
