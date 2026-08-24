@@ -8,25 +8,25 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout GitHub
+      - name: Checkout GitHub repository
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
           fetch-tags: true
 
-      - name: Configure GitLab remote
+      - name: Add GitLab remote
         env:
           GITLAB_TOKEN: ${{ secrets.GITLAB_TOKEN }}
         run: |
           git remote add gitlab \
             "https://oauth2:${GITLAB_TOKEN}@gitlab.com/Nouments/argus.git"
 
-      - name: Sync branches
+      - name: Synchronize branches
         run: |
           git push gitlab \
             '+refs/heads/*:refs/heads/*'
 
-      - name: Sync tags
+      - name: Synchronize tags
         run: |
           git push gitlab \
             '+refs/tags/*:refs/tags/*'
