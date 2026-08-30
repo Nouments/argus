@@ -6,42 +6,41 @@ import (
 	"runtime"
 )
 
-//host spec that  will bw returned to the main on boot for checking os to load path
+// host spec that  will bw returned to the main on boot for checking os to load path
 type Host struct {
-	OS string
+	OS   string
 	Arch string
 }
 
-//metadata that is used  for endpoint spec on dashboard or the tui on server 
-type HostMetadata struct{
-	Hostname string
+// metadata that is used  for endpoint spec on dashboard or the tui on server
+type HostMetadata struct {
+	Hostname   string
 	Interfaces []net.Interface
-
 }
 
-//detect os on boot
-func DetectkHost()(*Host,error){
+// detect os on boot
+func DetectkHost() (*Host, error) {
 	return &Host{
-		OS: runtime.GOOS,
+		OS:   runtime.GOOS,
 		Arch: runtime.GOARCH,
-	},nil
+	}, nil
 }
 
-//fetch metadata for enrollement 
-func GetMetadata() (*HostMetadata,error){
-	hostname,err := os.Hostname()
+// fetch metadata for enrollement
+func GetMetadata() (*HostMetadata, error) {
+	hostname, err := os.Hostname()
 	if err != nil {
-		return nil,err
+		return nil, err
 	}
 
-	interfaces,err := net.Interfaces()
-	if err!=nil{
-		return nil,err
+	interfaces, err := net.Interfaces()
+	if err != nil {
+		return nil, err
 	}
-	
+
 	return &HostMetadata{
-		Hostname: hostname,
+		Hostname:   hostname,
 		Interfaces: interfaces,
-	},nil
-	
+	}, nil
+
 }

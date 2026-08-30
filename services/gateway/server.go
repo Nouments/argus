@@ -1,0 +1,302 @@
+package gateway
+
+import (
+	"context"
+	"crypto/hmac"
+	"crypto/rand"
+	"crypto/sha256"
+	"crypto/tls"
+	"crypto/x509"
+	"encoding/base64"
+	"encoding/hex"
+	"encoding/json"
+	"fmt"
+	"net"
+	"os"
+	"strings"
+	"sync"
+	"time"
+
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/credentials"
+	"google.golang.org/grpc/metadata"
+	"google.golang.org/grpc/status"
+
+	agentpb "github.com/Nouments/argus/proto/agent"
+)
+
+type sessionClaims struct {
+	AgentID    string `json:"agent_id"`
+	SiteID     string `json:"site_id"`
+	IssuedAt   int64  `json:"iat"`
+	ExpiresAt  int64  `json:"exp"`
+	SessionID  string `json:"sid"`
+	TokenType  string `json:"typ"`
+	RefreshKey string `json:"rkey,omitempty"`
+}
+
+type sessionPair struct {
+	AccessToken  string `json:"access_token"`
+	RefreshToken string `json:"refresh_token"`
+}
+
+type refreshRecord struct {
+	Token string
+	Exp   time.Time
+}
+
+// Server implements the agent-to-gateway gRPC contract.
+type Server struct {
+	agentpb.UnimplementedAgentServiceServer
+	mu      sync.RWMutex
+	workers int
+	refresh map[string]refreshRecord
+}
+
+// NewServer creates a gateway server instance.
+func NewServer() *Server {
+	return &Server{workers: 8, refresh: make(map[string]refreshRecord)}
+}
+
+func validateGatewayToken(value string) bool {
+	configured := strings.TrimSpace(os.Getenv("ARGUS_GATEWAY_TOKEN"))
+	if configured == "" {
+		return true
+	}
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return false
+	}
+	prefix := "Bearer "
+	if !strings.HasPrefix(value, prefix) {
+		return false
+	}
+	return strings.TrimSpace(strings.TrimPrefix(value, prefix)) == configured
+}
+
+func authInterceptor(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
+	if info == nil || info.FullMethod == "" {
+		return handler(ctx, req)
+	}
+	if !validateGatewayToken(readBearerTokenFromContext(ctx)) {
+		return nil, status.Error(codes.Unauthenticated, "invalid or missing bearer token")
+	}
+	return handler(ctx, req)
+}
+
+func readBearerTokenFromContext(ctx context.Context) string {
+	md, ok := metadata.FromIncomingContext(ctx)
+	if !ok {
+		return ""
+	}
+	values := md.Get("authorization")
+	if len(values) == 0 {
+		return ""
+	}
+	return values[0]
+}
+
+func base64URL(data []byte) string {
+	return strings.TrimRight(base64.URLEncoding.EncodeToString(data), "=")
+}
+
+func decodeJWTPart(part string) ([]byte, error) {
+	if part == "" {
+		return nil, fmt.Errorf("empty jwt part")
+	}
+	if len(part)%4 != 0 {
+		part += strings.Repeat("=", 4-len(part)%4)
+	}
+	return base64.URLEncoding.DecodeString(part)
+}
+
+func signPayload(secret string, payload []byte) string {
+	h := hmac.New(sha256.New, []byte(secret))
+	_, _ = h.Write(payload)
+	return base64URL(h.Sum(nil))
+}
+
+func issueSignedToken(secret string, claims sessionClaims) (string, error) {
+	header := map[string]string{"alg": "HS256", "typ": "JWT"}
+	headerJSON, err := json.Marshal(header)
+	if err != nil {
+		return "", err
+	}
+	claimsJSON, err := json.Marshal(claims)
+	if err != nil {
+		return "", err
+	}
+	headerPart := base64URL(headerJSON)
+	claimsPart := base64URL(claimsJSON)
+	signature := signPayload(secret, []byte(headerPart+"."+claimsPart))
+	return headerPart + "." + claimsPart + "." + signature, nil
+}
+
+func newSessionNonce() string {
+	buf := make([]byte, 16)
+	if _, err := rand.Read(buf); err != nil {
+		return fmt.Sprintf("nonce-%d", time.Now().UnixNano())
+	}
+	return hex.EncodeToString(buf)
+}
+
+func ValidateAccessToken(token string) (*sessionClaims, error) {
+	secret := strings.TrimSpace(os.Getenv("ARGUS_SESSION_SECRET"))
+	if secret == "" {
+		secret = "default-session-secret-change-me"
+	}
+	parts := strings.Split(token, ".")
+	if len(parts) != 3 {
+		return nil, fmt.Errorf("invalid token format")
+	}
+	headerPart, claimsPart, sigPart := parts[0], parts[1], parts[2]
+	expectedSig := signPayload(secret, []byte(headerPart+"."+claimsPart))
+	if !hmac.Equal([]byte(expectedSig), []byte(sigPart)) {
+		return nil, fmt.Errorf("invalid token signature")
+	}
+	claimsData, err := decodeJWTPart(claimsPart)
+	if err != nil {
+		return nil, err
+	}
+	var claims sessionClaims
+	if err := json.Unmarshal(claimsData, &claims); err != nil {
+		return nil, err
+	}
+	if claims.ExpiresAt > 0 && time.Now().Unix() > claims.ExpiresAt {
+		return nil, fmt.Errorf("token expired")
+	}
+	return &claims, nil
+}
+
+func IssueEnrollmentToken(agentID, siteID string) (string, error) {
+	secret := strings.TrimSpace(os.Getenv("ARGUS_SESSION_SECRET"))
+	if secret == "" {
+		secret = "default-session-secret-change-me"
+	}
+	claims := sessionClaims{
+		AgentID:   agentID,
+		SiteID:    siteID,
+		IssuedAt:  time.Now().Unix(),
+		ExpiresAt: time.Now().Add(30 * time.Minute).Unix(),
+		SessionID: "enroll-" + agentID + "-" + siteID,
+		TokenType: "enrollment",
+	}
+	return issueSignedToken(secret, claims)
+}
+
+func IssueSessionPair(agentID, siteID string) (*sessionPair, error) {
+	secret := strings.TrimSpace(os.Getenv("ARGUS_SESSION_SECRET"))
+	if secret == "" {
+		secret = "default-session-secret-change-me"
+	}
+	now := time.Now()
+	sessionID := "sess-" + agentID + "-" + siteID + "-" + newSessionNonce()
+	accessClaims := sessionClaims{
+		AgentID:   agentID,
+		SiteID:    siteID,
+		IssuedAt:  now.Unix(),
+		ExpiresAt: now.Add(15 * time.Minute).Unix(),
+		SessionID: sessionID,
+		TokenType: "access",
+	}
+	refreshClaims := sessionClaims{
+		AgentID:    agentID,
+		SiteID:     siteID,
+		IssuedAt:   now.Unix(),
+		ExpiresAt:  now.Add(7 * 24 * time.Hour).Unix(),
+		SessionID:  sessionID,
+		TokenType:  "refresh",
+		RefreshKey: newSessionNonce(),
+	}
+	accessToken, err := issueSignedToken(secret, accessClaims)
+	if err != nil {
+		return nil, err
+	}
+	refreshToken, err := issueSignedToken(secret, refreshClaims)
+	if err != nil {
+		return nil, err
+	}
+	return &sessionPair{AccessToken: accessToken, RefreshToken: refreshToken}, nil
+}
+
+func RotateRefreshToken(refreshToken string) (*sessionPair, error) {
+	claims, err := ValidateAccessToken(refreshToken)
+	if err != nil {
+		return nil, err
+	}
+	if claims.TokenType != "refresh" {
+		return nil, fmt.Errorf("token is not a refresh token")
+	}
+	if claims.SessionID == "" {
+		return nil, fmt.Errorf("refresh token missing session id")
+	}
+	return IssueSessionPair(claims.AgentID, claims.SiteID)
+}
+
+// SubmitEvent accepts an event envelope from an agent and validates the minimum payload.
+func (s *Server) SubmitEvent(ctx context.Context, in *agentpb.EventEnvelope) (*agentpb.SubmitEventResponse, error) {
+	if in == nil {
+		return nil, fmt.Errorf("nil event envelope")
+	}
+	if strings.TrimSpace(in.GetEventId()) == "" {
+		return nil, fmt.Errorf("event_id is required")
+	}
+	if strings.TrimSpace(in.GetSiteId()) == "" {
+		return nil, fmt.Errorf("site_id is required")
+	}
+	if strings.TrimSpace(in.GetAgentId()) == "" {
+		return nil, fmt.Errorf("agent_id is required")
+	}
+	if strings.TrimSpace(in.GetRaw()) == "" {
+		return nil, fmt.Errorf("raw payload is required")
+	}
+	return &agentpb.SubmitEventResponse{Accepted: true, Message: "event accepted"}, nil
+}
+
+// buildServerOptions configures gRPC server credentials with mTLS when certificates are available.
+func buildServerOptions(certPath, keyPath, caPath string) ([]grpc.ServerOption, error) {
+	if certPath == "" && keyPath == "" && caPath == "" {
+		return []grpc.ServerOption{}, nil
+	}
+	if certPath == "" || keyPath == "" {
+		return nil, fmt.Errorf("both cert and key are required for TLS")
+	}
+	cert, err := tls.LoadX509KeyPair(certPath, keyPath)
+	if err != nil {
+		return nil, fmt.Errorf("load server cert: %w", err)
+	}
+	cfg := &tls.Config{
+		MinVersion:   tls.VersionTLS13,
+		Certificates: []tls.Certificate{cert},
+	}
+	if caPath != "" {
+		caPEM, err := os.ReadFile(caPath)
+		if err != nil {
+			return nil, fmt.Errorf("read CA cert: %w", err)
+		}
+		pool := x509.NewCertPool()
+		if !pool.AppendCertsFromPEM(caPEM) {
+			return nil, fmt.Errorf("parse CA certificate")
+		}
+		cfg.ClientCAs = pool
+		cfg.ClientAuth = tls.RequireAndVerifyClientCert
+	}
+	return []grpc.ServerOption{grpc.Creds(credentials.NewTLS(cfg))}, nil
+}
+
+// RunGRPCServer starts a gRPC listener for the agent service.
+func RunGRPCServer(addr, certPath, keyPath, caPath string) error {
+	listener, err := net.Listen("tcp", addr)
+	if err != nil {
+		return err
+	}
+	opts, err := buildServerOptions(certPath, keyPath, caPath)
+	if err != nil {
+		_ = listener.Close()
+		return err
+	}
+	server := grpc.NewServer(append([]grpc.ServerOption{grpc.UnaryInterceptor(authInterceptor)}, opts...)...)
+	agentpb.RegisterAgentServiceServer(server, NewServer())
+	return server.Serve(listener)
+}

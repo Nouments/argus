@@ -1,0 +1,33 @@
+name: siem-mvp-ci
+
+on: [push, pull_request]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: '1.21'
+      - name: Run tests
+        run: |
+          cd apps/siem-mvp
+          go test ./...
+      - name: Run go vet
+        run: |
+          cd apps/siem-mvp
+          go vet ./...
+      - name: Install golangci-lint
+        run: |
+          curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $GOPATH/bin v1.59.0 || true
+      - name: Run golangci-lint
+        run: |
+          cd apps/siem-mvp
+          $GOPATH/bin/golangci-lint run ./...
+      - name: Run govulncheck
+        run: |
+          cd apps/siem-mvp
+          go install golang.org/x/vuln/cmd/govulncheck@latest
+          GOWORK=off govulncheck ./...

@@ -1,0 +1,26 @@
+syntax = "proto3";
+
+package agent;
+
+option go_package = "github.com/Nouments/argus/proto/agent;agent";
+
+message EventEnvelope {
+  string event_id = 1;
+  string timestamp = 2;
+  string site_id = 3;
+  string agent_id = 4;
+  string event_type = 5;
+  string severity = 6;
+  string host = 7;
+  string raw = 8;
+  string integrity = 9;
+}
+
+service AgentService {
+  rpc SubmitEvent(EventEnvelope) returns (SubmitEventResponse);
+}
+
+message SubmitEventResponse {
+  bool accepted = 1;
+  string message = 2;
+}
