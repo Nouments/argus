@@ -34,7 +34,9 @@ func (w *winEventLogCollector) Collect() ([]byte, error) {
 			if strings.TrimSpace(p) == "" {
 				continue
 			}
-			records = append(records, map[string]string{"raw": p})
+			// try to parse structured key: value pairs from the raw record
+			parsed := parseWinRecord(p)
+			records = append(records, parsed)
 		}
 		payloadObj := map[string]any{"source": "windows.eventlog", "records": records}
 		if b, err := json.Marshal(payloadObj); err == nil {
