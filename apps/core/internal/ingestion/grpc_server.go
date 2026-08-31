@@ -95,7 +95,7 @@ func (s *Server) SubmitEvents(stream agentpb.AgentService_SubmitEventsServer) er
 			continue
 		}
 		if ev.ReceivedAt == "" {
-			ev.StampReceivedAt(s.now)
+			ev.StampReceivedAt(s.now())
 		}
 		if err := s.store.SaveEvent(stream.Context(), ev); err != nil {
 			return status.Error(codes.Internal, err.Error())
