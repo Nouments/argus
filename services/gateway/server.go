@@ -11,6 +11,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"strings"
@@ -252,6 +253,27 @@ func (s *Server) SubmitEvent(ctx context.Context, in *agentpb.EventEnvelope) (*a
 		return nil, fmt.Errorf("raw payload is required")
 	}
 	return &agentpb.SubmitEventResponse{Accepted: true, Message: "event accepted"}, nil
+}
+
+// SubmitEvents handles a client-side stream of EventEnvelope messages and replies with a single ack.
+func (s *Server) SubmitEvents(stream agentpb.AgentService_SubmitEventsServer) error {
+	var ids []string
+	for {
+		in, err := stream.Recv()
+		if err == io.EOF {
+			// end of stream
+			break
+		}
+		if err != nil {
+			return err
+		}
+		if strings.TrimSpace(in.GetEventId()) == "" {
+			continue
+		}
+		ids = append(ids, in.GetEventId())
+	}
+	ack := &agentpb.SubmitEventAck{Accepted: true, EventId: ids}
+	return stream.SendAndClose(ack)
 }
 
 // buildServerOptions configures gRPC server credentials with mTLS when certificates are available.
