@@ -21,6 +21,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"
+	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 
@@ -53,11 +54,18 @@ type Server struct {
 	mu      sync.RWMutex
 	workers int
 	refresh map[string]refreshRecord
+	// optional ingestion client to forward events
+	ingestionClient agentpb.AgentServiceClient
+	ingestionConn   *grpc.ClientConn
 }
 
 // NewServer creates a gateway server instance.
 func NewServer() *Server {
 	return &Server{workers: 8, refresh: make(map[string]refreshRecord)}
+}
+
+func NewServerWithIngestion(client agentpb.AgentServiceClient, conn *grpc.ClientConn) *Server {
+	return &Server{workers: 8, refresh: make(map[string]refreshRecord), ingestionClient: client, ingestionConn: conn}
 }
 
 func validateGatewayToken(value string) bool {
@@ -258,6 +266,41 @@ func (s *Server) SubmitEvent(ctx context.Context, in *agentpb.EventEnvelope) (*a
 // SubmitEvents handles a client-side stream of EventEnvelope messages and replies with a single ack.
 func (s *Server) SubmitEvents(stream agentpb.AgentService_SubmitEventsServer) error {
 	var ids []string
+	// if we have an ingestion client, forward the stream
+	if s.ingestionClient != nil {
+		clientStream, err := s.ingestionClient.SubmitEvents(stream.Context())
+		if err != nil {
+			return err
+		}
+		for {
+			in, err := stream.Recv()
+			if err == io.EOF {
+				break
+			}
+			if err != nil {
+				_ = clientStream.CloseSend()
+				return err
+			}
+			if strings.TrimSpace(in.GetEventId()) == "" {
+				continue
+			}
+			// forward to ingestion
+			if err := clientStream.Send(in); err != nil {
+				_ = clientStream.CloseSend()
+				return err
+			}
+			ids = append(ids, in.GetEventId())
+		}
+		// close client stream and receive ack from ingestion
+		ingAck, err := clientStream.CloseAndRecv()
+		if err != nil {
+			return err
+		}
+		// return an ack that contains ingestion's accepted flag and the forwarded ids
+		ack := &agentpb.SubmitEventAck{Accepted: ingAck.GetAccepted(), EventId: ids}
+		return stream.SendAndClose(ack)
+	}
+	// default: collect ids and ack locally
 	for {
 		in, err := stream.Recv()
 		if err == io.EOF {
@@ -318,7 +361,24 @@ func RunGRPCServer(addr, certPath, keyPath, caPath string) error {
 		_ = listener.Close()
 		return err
 	}
-	server := grpc.NewServer(append([]grpc.ServerOption{grpc.UnaryInterceptor(authInterceptor)}, opts...)...)
-	agentpb.RegisterAgentServiceServer(server, NewServer())
-	return server.Serve(listener)
+	// if ARGUS_INGESTION_ADDR is set, create a client to forward events
+	ingestionAddr := strings.TrimSpace(os.Getenv("ARGUS_INGESTION_ADDR"))
+	var srv *grpc.Server
+	if ingestionAddr != "" {
+		// dial ingestion
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		conn, err := grpc.DialContext(ctx, ingestionAddr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+		if err != nil {
+			_ = listener.Close()
+			return err
+		}
+		client := agentpb.NewAgentServiceClient(conn)
+		srv = grpc.NewServer(append([]grpc.ServerOption{grpc.UnaryInterceptor(authInterceptor)}, opts...)...)
+		agentpb.RegisterAgentServiceServer(srv, NewServerWithIngestion(client, conn))
+	} else {
+		srv = grpc.NewServer(append([]grpc.ServerOption{grpc.UnaryInterceptor(authInterceptor)}, opts...)...)
+		agentpb.RegisterAgentServiceServer(srv, NewServer())
+	}
+	return srv.Serve(listener)
 }

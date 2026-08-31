@@ -1,5 +1,5 @@
 //go:build !windows
-package etw
+package eventlog
 
 import (
 	"encoding/json"
@@ -12,12 +12,12 @@ import (
 	"github.com/Nouments/argus/apps/agent/internal/host"
 )
 
-// Placeholder: ETW collector.
-type etwCollector struct{}
+type eventLogCollector struct{}
 
-func (e *etwCollector) Name() string { return "windows-etw" }
+func (e *eventLogCollector) Name() string { return "windows-eventlog" }
 
-func (e *etwCollector) Collect() ([]byte, error) {
+func (e *eventLogCollector) Collect() ([]byte, error) {
+	// placeholder generic collector returns a canonical event with sample message
 	meta, _ := host.GetMetadata()
 	hostname := "unknown"
 	if meta != nil {
@@ -42,10 +42,10 @@ func (e *etwCollector) Collect() ([]byte, error) {
 		Timestamp: time.Now().UTC().Format(time.RFC3339),
 		SiteID:    site,
 		AgentID:   agent,
-		EventType: "windows.etw.sample",
+		EventType: "windows.eventlog.sample",
 		Severity:  "low",
 		Host:      hostname,
-		Raw:       "etw placeholder",
+		Raw:       "sample windows eventlog placeholder",
 	}
 	if ev.Integrity == "" {
 		ev.Integrity = ev.ComputeIntegrity()
@@ -53,4 +53,4 @@ func (e *etwCollector) Collect() ([]byte, error) {
 	return json.Marshal(ev)
 }
 
-func NewETWCollector() collector.Collector { return &etwCollector{} }
+func NewEventLogCollector() collector.Collector { return &eventLogCollector{} }

@@ -43,7 +43,19 @@ func main() {
 	}()
 
 	alertManager := alerting.NewManager()
-	detector, err := detection.NewEngine(defaultRules(), alertManager)
+	// load rules from file if provided, otherwise use embedded defaults
+	var ruleSet []rules.Rule
+	rulesFile := strings.TrimSpace(os.Getenv("ARGUS_RULES_FILE"))
+	if rulesFile != "" {
+		if rset, err := rules.LoadRulesFromFile(rulesFile); err == nil {
+			ruleSet = rset
+		} else {
+			log.Fatalf("load rules: %v", err)
+		}
+	} else {
+		ruleSet = defaultRules()
+	}
+	detector, err := detection.NewEngine(ruleSet, alertManager)
 	if err != nil {
 		log.Fatalf("configure detection: %v", err)
 	}

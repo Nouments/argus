@@ -17,6 +17,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"runtime"
 	"sync"
 	"time"
 
@@ -24,6 +25,8 @@ import (
 	"github.com/Nouments/argus/apps/agent/internal/buffer"
 	"github.com/Nouments/argus/apps/agent/internal/collector"
 	"github.com/Nouments/argus/apps/agent/internal/collector/windows"
+	"github.com/Nouments/argus/apps/agent/internal/collector/linux/packages"
+	"github.com/Nouments/argus/apps/agent/internal/collector/linux/services"
 	"github.com/Nouments/argus/apps/agent/internal/event"
 	"github.com/Nouments/argus/apps/agent/internal/pipeline"
 	"github.com/Nouments/argus/apps/agent/internal/storage"
@@ -115,9 +118,22 @@ func main() {
 	}
 	defer grpcClient.Close()
 
-	// Register available collectors (include Windows sample collector)
+	// Register available collectors depending on OS
 	reg := collector.NewRegistry()
-	_ = reg.Register(windows.NewSampleCollector())
+	switch runtime.GOOS {
+	case "windows":
+		_ = reg.Register(windows.NewSampleCollector())
+		_ = reg.Register(windows.NewEventLogCollector())
+		_ = reg.Register(windows.NewNetworkCollector())
+		_ = reg.Register(windows.NewProcessCollector())
+		// ETW collector
+		_ = reg.Register(windows.NewETWCollector())
+	default:
+		// Linux/Unix collectors
+		_ = reg.Register(packages.NewPackageCollector())
+		_ = reg.Register(services.NewServicesCollector())
+	}
+	_ = pipeline.New(reg, nil)
 	_ = pipeline.New(reg, nil)
 
 	sample, err := buildSampleEvent()
