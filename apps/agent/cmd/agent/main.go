@@ -254,22 +254,33 @@ func attemptGRPCFlush(grpcTarget, bufferPath string, key []byte) error {
 		return fmt.Errorf("mismatch decrypted vs raw lines")
 	}
 	remaining := make([]string, 0, len(rawLines))
+	// Build envelopes
+	var envelopes []*transport.EventEnvelope
 	for i, pt := range pts {
 		ev, err := event.FromJSON([]byte(pt))
 		if err != nil {
 			remaining = append(remaining, rawLines[i])
 			continue
 		}
-		client, err := transport.NewSecureGRPCClient(context.Background(), grpcTarget, *certPath, *keyPath, *caPath)
-		if err != nil {
-			return err
+		envelopes = append(envelopes, transport.EventToEnvelope(ev))
+	}
+	if len(envelopes) == 0 {
+		if len(remaining) == 0 {
+			_ = os.Remove(bufferPath)
 		}
-		err = client.Send(transport.EventToEnvelope(ev))
-		_ = client.Close()
-		if err != nil {
-			remaining = append(remaining, rawLines[i])
-			continue
-		}
+		return nil
+	}
+	client, err := transport.NewSecureGRPCClient(context.Background(), grpcTarget, *certPath, *keyPath, *caPath)
+	if err != nil {
+		return err
+	}
+	defer client.Close()
+	if err := client.SendBatch(envelopes); err != nil {
+		// keep all original rawLines as remaining on failure
+		return fmt.Errorf("batch send failed: %w", err)
+	}
+	// mark all as written
+	for _, pt := range pts {
 		_ = storage.ClickHouseWriteMock("./data", "clickhouse_mock.jsonl", pt)
 	}
 	if len(remaining) == 0 {
