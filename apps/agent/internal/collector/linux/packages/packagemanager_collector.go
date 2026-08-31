@@ -6,6 +6,7 @@ import (
     "fmt"
     "os"
     "os/exec"
+    "strings"
     "time"
 
     "github.com/Nouments/argus/apps/agent/internal/collector"
@@ -17,7 +18,7 @@ type packageCollector struct{}
 
 func (p *packageCollector) Name() string { return "linux-packages" }
 
-func runCmd(timeout time.Duration, name string, args ...string) (string, error) {
+var runCmd = func(timeout time.Duration, name string, args ...string) (string, error) {
     ctx, cancel := context.WithTimeout(context.Background(), timeout)
     defer cancel()
     cmd := exec.CommandContext(ctx, name, args...)
@@ -55,13 +56,13 @@ func (p *packageCollector) Collect() ([]byte, error) {
     if out, err := runCmd(10*time.Second, "brew", "list", "--versions"); err == nil {
         results["brew"] = out
     }
-    // flatten into raw string and truncate
-    combined := ""
-    for k, v := range results {
-        combined += fmt.Sprintf("--- %s ---\n%s\n", k, v)
-    }
-    if len(combined) > 100000 {
-        combined = combined[:100000]
+    // parse into structured packages
+    pkgs := parsePackageOutputs(results)
+
+    payloadObj := map[string]any{"source": "linux.packages", "packages": pkgs}
+    b, err := json.Marshal(payloadObj)
+    if err != nil {
+        return nil, err
     }
 
     meta, _ := host.GetMetadata()
@@ -92,12 +93,95 @@ func (p *packageCollector) Collect() ([]byte, error) {
         EventType: "inventory.packages",
         Severity:  "low",
         Host:      hostname,
-        Raw:       combined,
+        Raw:       string(b),
     }
-    if ev.Integrity == "" {
-        ev.Integrity = ev.ComputeIntegrity()
-    }
+    ev.Integrity = ev.ComputeIntegrity()
     return json.Marshal(ev)
 }
+
+// Package represents a discovered package record.
+type Package struct {
+    Name    string `json:"name"`
+    Version string `json:"version"`
+    Source  string `json:"source"`
+}
+
+// parsePackageOutputs attempts to extract package name/version pairs from
+// the raw outputs of various package manager commands.
+func parsePackageOutputs(results map[string]string) []Package {
+    pkgs := make([]Package, 0)
+    for src, out := range results {
+        lines := splitLines(out)
+        for _, l := range lines {
+            if l == "" {
+                continue
+            }
+            var name, ver string
+            switch src {
+            case "dpkg":
+                // format: name@version
+                if i := strings.Index(l, "@"); i >= 0 {
+                    name = l[:i]
+                    ver = l[i+1:]
+                }
+            case "rpm":
+                if i := strings.Index(l, "@"); i >= 0 {
+                    name = l[:i]
+                    ver = l[i+1:]
+                }
+            case "pacman":
+                parts := strings.Fields(l)
+                if len(parts) >= 2 {
+                    name = parts[0]
+                    ver = parts[1]
+                }
+            case "apk":
+                if i := strings.LastIndex(l, "-"); i >= 0 {
+                    name = l[:i]
+                    ver = l[i+1:]
+                }
+            case "dnf", "yum":
+                parts := strings.Fields(l)
+                if len(parts) >= 2 {
+                    n := parts[0]
+                    if j := strings.LastIndex(n, "."); j >= 0 {
+                        name = n[:j]
+                    } else {
+                        name = n
+                    }
+                    ver = parts[1]
+                }
+            case "brew":
+                parts := strings.Fields(l)
+                if len(parts) >= 2 {
+                    name = parts[0]
+                    ver = parts[1]
+                }
+            case "snap":
+                parts := strings.Fields(l)
+                if len(parts) >= 2 && parts[0] != "Name" {
+                    name = parts[0]
+                    ver = parts[1]
+                }
+            case "flatpak":
+                parts := strings.Fields(l)
+                if len(parts) >= 2 {
+                    name = parts[0]
+                    ver = parts[1]
+                }
+            default:
+                name = l
+                ver = ""
+            }
+            if name == "" {
+                continue
+            }
+            pkgs = append(pkgs, Package{Name: name, Version: ver, Source: src})
+        }
+    }
+    return pkgs
+}
+
+func splitLines(s string) []string { return strings.Split(strings.ReplaceAll(s, "\r\n", "\n"), "\n") }
 
 func NewPackageCollector() collector.Collector { return &packageCollector{} }

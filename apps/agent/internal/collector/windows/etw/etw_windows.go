@@ -19,15 +19,12 @@ type etwWinCollector struct{}
 func (e *etwWinCollector) Name() string { return "windows-etw" }
 
 func (e *etwWinCollector) Collect() ([]byte, error) {
-    ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-    defer cancel()
-    cmd := exec.CommandContext(ctx, "wevtutil", "el")
-    out, err := cmd.Output()
+    out, err := runCmd(3*time.Second, "wevtutil", "el")
     raw := ""
     if err != nil {
         raw = fmt.Sprintf("wevtutil list channels failed: %v", err)
     } else {
-        raw = string(out)
+        raw = out
     }
     if len(raw) > 100000 {
         raw = raw[:100000]
@@ -70,3 +67,12 @@ func (e *etwWinCollector) Collect() ([]byte, error) {
 }
 
 func NewETWCollector() collector.Collector { return &etwWinCollector{} }
+
+// runCmd is a package-level variable so tests can override it.
+var runCmd = func(timeout time.Duration, name string, args ...string) (string, error) {
+    ctx, cancel := context.WithTimeout(context.Background(), timeout)
+    defer cancel()
+    cmd := exec.CommandContext(ctx, name, args...)
+    out, err := cmd.CombinedOutput()
+    return string(out), err
+}

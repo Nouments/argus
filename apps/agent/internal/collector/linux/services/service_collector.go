@@ -18,11 +18,8 @@ type servicesCollector struct{}
 func (s *servicesCollector) Name() string { return "linux-services" }
 
 func (s *servicesCollector) Collect() ([]byte, error) {
-    // try systemctl to list running services
-    ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-    defer cancel()
-    cmd := exec.CommandContext(ctx, "systemctl", "list-units", "--type=service", "--state=running", "--no-legend")
-    out, err := cmd.CombinedOutput()
+    // try systemctl to list running services (mockable runCmd)
+    out, err := runCmd(5*time.Second, "systemctl", "list-units", "--type=service", "--state=running", "--no-legend")
     var raw string
     if err != nil {
         raw = fmt.Sprintf("error: %v", err)
@@ -70,3 +67,12 @@ func (s *servicesCollector) Collect() ([]byte, error) {
 }
 
 func NewServicesCollector() collector.Collector { return &servicesCollector{} }
+
+// runCmd is a package-level variable so tests can override it.
+var runCmd = func(timeout time.Duration, name string, args ...string) (string, error) {
+    ctx, cancel := context.WithTimeout(context.Background(), timeout)
+    defer cancel()
+    cmd := exec.CommandContext(ctx, name, args...)
+    out, err := cmd.CombinedOutput()
+    return string(out), err
+}

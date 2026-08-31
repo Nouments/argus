@@ -19,15 +19,12 @@ type winEventLogCollector struct{}
 func (w *winEventLogCollector) Name() string { return "windows-eventlog-wevtutil" }
 
 func (w *winEventLogCollector) Collect() ([]byte, error) {
-    ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-    defer cancel()
-    cmd := exec.CommandContext(ctx, "wevtutil", "qe", "Security", "/c:50", "/f:text")
-    out, err := cmd.Output()
+    out, err := runCmd(5*time.Second, "wevtutil", "qe", "Security", "/c:50", "/f:text")
     raw := ""
     if err != nil {
         raw = fmt.Sprintf("wevtutil query failed: %v", err)
     } else {
-        raw = string(out)
+        raw = out
     }
     if len(raw) > 100000 {
         raw = raw[:100000]
@@ -70,3 +67,12 @@ func (w *winEventLogCollector) Collect() ([]byte, error) {
 }
 
 func NewEventLogCollector() collector.Collector { return &winEventLogCollector{} }
+
+// runCmd is a package-level variable so tests can override it.
+var runCmd = func(timeout time.Duration, name string, args ...string) (string, error) {
+    ctx, cancel := context.WithTimeout(context.Background(), timeout)
+    defer cancel()
+    cmd := exec.CommandContext(ctx, name, args...)
+    out, err := cmd.CombinedOutput()
+    return string(out), err
+}

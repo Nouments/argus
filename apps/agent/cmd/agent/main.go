@@ -133,8 +133,22 @@ func main() {
 		_ = reg.Register(packages.NewPackageCollector())
 		_ = reg.Register(services.NewServicesCollector())
 	}
-	_ = pipeline.New(reg, nil)
-	_ = pipeline.New(reg, nil)
+	p := pipeline.New(reg, nil)
+
+	// Start periodic collector scheduler
+	collectInterval := 60 * time.Second
+	if s := os.Getenv("COLLECT_INTERVAL"); s != "" {
+		if d, err := time.ParseDuration(s); err == nil {
+			collectInterval = d
+		}
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		runCollectorLoop(ctx, p, grpcClient, collectInterval)
+	}()
 
 	sample, err := buildSampleEvent()
 	if err != nil {
@@ -185,6 +199,48 @@ func main() {
 		return
 	}
 	fmt.Printf("grpc gateway accepted event: %s\n", ev.EventID)
+	// keep running (collector loop) until interrupted
+	defer cancel()
+	wg.Wait()
+	select {}
+}
+
+// runCollectorLoop periodically runs the pipeline, converts payloads to envelopes and sends them.
+func runCollectorLoop(ctx context.Context, p *pipeline.Pipeline, client *transport.GRPCClient, interval time.Duration) {
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			items, err := p.Process()
+			if err != nil {
+				log.Printf("pipeline process: %v", err)
+				continue
+			}
+			envelopes := make([]*transport.EventEnvelope, 0, len(items))
+			for _, it := range items {
+				ev, err := event.FromJSON(it.Raw)
+				if err != nil {
+					log.Printf("invalid event from collector %s: %v", it.Source, err)
+					continue
+				}
+				envelopes = append(envelopes, transport.EventToEnvelope(ev))
+			}
+			if len(envelopes) == 0 {
+				continue
+			}
+			if err := client.SendBatch(envelopes); err != nil {
+				log.Printf("collector send batch failed: %v", err)
+			} else {
+				// optionally persist to mock ClickHouse for local dev
+				for _, e := range envelopes {
+					_ = storage.ClickHouseWriteMock("./data", "clickhouse_mock.jsonl", []byte(e.Raw))
+				}
+			}
+		}
+	}
 }
 
 // flushBufferLoop is kept for compatibility with the legacy HTTP-based tests and existing code paths.

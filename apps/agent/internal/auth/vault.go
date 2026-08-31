@@ -22,6 +22,11 @@ func GetKeyFromVault(secretPath string) ([]byte, error) {
 	if addr == "" || token == "" {
 		return nil, errors.New("VAULT_ADDR or VAULT_TOKEN not set")
 	}
+	// prefer HTTPS for Vault endpoints; allow http only for localhost testing
+	la := strings.ToLower(strings.TrimSpace(addr))
+	if strings.HasPrefix(la, "http://") && !strings.Contains(la, "localhost") && !strings.Contains(la, "127.0.0.1") {
+		return nil, errors.New("VAULT_ADDR must use https:// for non-local addresses")
+	}
 	// build URL
 	url := strings.TrimRight(addr, "/") + "/v1/" + strings.TrimLeft(secretPath, "/")
 	client := &http.Client{Timeout: 10 * time.Second}
@@ -78,6 +83,10 @@ func WriteKeyToVault(secretPath string, key []byte) error {
 	if addr == "" || token == "" {
 		return errors.New("VAULT_ADDR or VAULT_TOKEN not set")
 	}
+	la := strings.ToLower(strings.TrimSpace(addr))
+	if strings.HasPrefix(la, "http://") && !strings.Contains(la, "localhost") && !strings.Contains(la, "127.0.0.1") {
+		return errors.New("VAULT_ADDR must use https:// for non-local addresses")
+	}
 	hexKey := hex.EncodeToString(key)
 	payload := map[string]any{"data": map[string]any{"key": hexKey}}
 	b, err := json.Marshal(payload)
@@ -110,6 +119,10 @@ func GetSecretFieldFromVault(secretPath, field string) ([]byte, error) {
 	token := os.Getenv("VAULT_TOKEN")
 	if addr == "" || token == "" {
 		return nil, errors.New("VAULT_ADDR or VAULT_TOKEN not set")
+	}
+	la := strings.ToLower(strings.TrimSpace(addr))
+	if strings.HasPrefix(la, "http://") && !strings.Contains(la, "localhost") && !strings.Contains(la, "127.0.0.1") {
+		return nil, errors.New("VAULT_ADDR must use https:// for non-local addresses")
 	}
 	url := strings.TrimRight(addr, "/") + "/v1/" + strings.TrimLeft(secretPath, "/")
 	client := &http.Client{Timeout: 10 * time.Second}
@@ -159,6 +172,10 @@ func WriteSecretFieldToVault(secretPath, field string, data []byte) error {
 	token := os.Getenv("VAULT_TOKEN")
 	if addr == "" || token == "" {
 		return errors.New("VAULT_ADDR or VAULT_TOKEN not set")
+	}
+	la := strings.ToLower(strings.TrimSpace(addr))
+	if strings.HasPrefix(la, "http://") && !strings.Contains(la, "localhost") && !strings.Contains(la, "127.0.0.1") {
+		return errors.New("VAULT_ADDR must use https:// for non-local addresses")
 	}
 	hexVal := hex.EncodeToString(data)
 	payload := map[string]any{"data": map[string]any{field: hexVal}}
