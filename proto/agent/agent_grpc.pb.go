@@ -2,7 +2,7 @@
 // versions:
 // - protoc-gen-go-grpc v1.5.1
 // - protoc             v7.35.1
-// source: proto/agent/agent.proto
+// source: agent/agent.proto
 
 package agent
 
@@ -19,14 +19,18 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	AgentService_SubmitEvent_FullMethodName = "/agent.AgentService/SubmitEvent"
+	AgentService_SubmitEvent_FullMethodName  = "/agent.AgentService/SubmitEvent"
+	AgentService_SubmitEvents_FullMethodName = "/agent.AgentService/SubmitEvents"
 )
 
 // AgentServiceClient is the client API for AgentService service.
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type AgentServiceClient interface {
+	// Unary RPC retained for compatibility
 	SubmitEvent(ctx context.Context, in *EventEnvelope, opts ...grpc.CallOption) (*SubmitEventResponse, error)
+	// Client-side streaming for batching
+	SubmitEvents(ctx context.Context, opts ...grpc.CallOption) (grpc.ClientStreamingClient[EventEnvelope, SubmitEventAck], error)
 }
 
 type agentServiceClient struct {
@@ -47,11 +51,27 @@ func (c *agentServiceClient) SubmitEvent(ctx context.Context, in *EventEnvelope,
 	return out, nil
 }
 
+func (c *agentServiceClient) SubmitEvents(ctx context.Context, opts ...grpc.CallOption) (grpc.ClientStreamingClient[EventEnvelope, SubmitEventAck], error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	stream, err := c.cc.NewStream(ctx, &AgentService_ServiceDesc.Streams[0], AgentService_SubmitEvents_FullMethodName, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &grpc.GenericClientStream[EventEnvelope, SubmitEventAck]{ClientStream: stream}
+	return x, nil
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type AgentService_SubmitEventsClient = grpc.ClientStreamingClient[EventEnvelope, SubmitEventAck]
+
 // AgentServiceServer is the server API for AgentService service.
 // All implementations must embed UnimplementedAgentServiceServer
 // for forward compatibility.
 type AgentServiceServer interface {
+	// Unary RPC retained for compatibility
 	SubmitEvent(context.Context, *EventEnvelope) (*SubmitEventResponse, error)
+	// Client-side streaming for batching
+	SubmitEvents(grpc.ClientStreamingServer[EventEnvelope, SubmitEventAck]) error
 	mustEmbedUnimplementedAgentServiceServer()
 }
 
@@ -64,6 +84,9 @@ type UnimplementedAgentServiceServer struct{}
 
 func (UnimplementedAgentServiceServer) SubmitEvent(context.Context, *EventEnvelope) (*SubmitEventResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method SubmitEvent not implemented")
+}
+func (UnimplementedAgentServiceServer) SubmitEvents(grpc.ClientStreamingServer[EventEnvelope, SubmitEventAck]) error {
+	return status.Errorf(codes.Unimplemented, "method SubmitEvents not implemented")
 }
 func (UnimplementedAgentServiceServer) mustEmbedUnimplementedAgentServiceServer() {}
 func (UnimplementedAgentServiceServer) testEmbeddedByValue()                      {}
@@ -104,6 +127,13 @@ func _AgentService_SubmitEvent_Handler(srv interface{}, ctx context.Context, dec
 	return interceptor(ctx, in, info, handler)
 }
 
+func _AgentService_SubmitEvents_Handler(srv interface{}, stream grpc.ServerStream) error {
+	return srv.(AgentServiceServer).SubmitEvents(&grpc.GenericServerStream[EventEnvelope, SubmitEventAck]{ServerStream: stream})
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type AgentService_SubmitEventsServer = grpc.ClientStreamingServer[EventEnvelope, SubmitEventAck]
+
 // AgentService_ServiceDesc is the grpc.ServiceDesc for AgentService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -116,6 +146,12 @@ var AgentService_ServiceDesc = grpc.ServiceDesc{
 			Handler:    _AgentService_SubmitEvent_Handler,
 		},
 	},
-	Streams:  []grpc.StreamDesc{},
-	Metadata: "proto/agent/agent.proto",
+	Streams: []grpc.StreamDesc{
+		{
+			StreamName:    "SubmitEvents",
+			Handler:       _AgentService_SubmitEvents_Handler,
+			ClientStreams: true,
+		},
+	},
+	Metadata: "agent/agent.proto",
 }
