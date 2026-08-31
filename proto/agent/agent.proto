@@ -1,0 +1,43 @@
+syntax = "proto3";
+
+package agent;
+
+option go_package = "github.com/Nouments/argus/proto/agent;agent";
+
+message EventEnvelope {
+  string event_id = 1;
+  string timestamp = 2;
+  string site_id = 3;
+  string agent_id = 4;
+  string event_type = 5;
+  string severity = 6;
+  string host = 7;
+  string raw = 8;
+  string integrity = 9;
+  string user = 10;
+  string src_ip = 11;
+  string dst_ip = 12;
+  map<string, string> labels = 13;
+  bytes normalized = 14;
+  bytes enrichment = 15;
+}
+
+message SubmitEventResponse {
+  bool accepted = 1;
+  string message = 2;
+}
+
+message SubmitEventAck {
+  bool accepted = 1;
+  string reason = 2;
+  bool retryable = 3;
+  repeated string event_id = 4;
+}
+
+service AgentService {
+  // Unary RPC retained for compatibility
+  rpc SubmitEvent(EventEnvelope) returns (SubmitEventResponse);
+
+  // Client-side streaming for batching
+  rpc SubmitEvents(stream EventEnvelope) returns (SubmitEventAck);
+}

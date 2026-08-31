@@ -1,0 +1,35 @@
+core:
+  listen_grpc: 0.0.0.0:443
+  listen_http: 0.0.0.0:8080
+  data_dir: /var/lib/argus/core
+
+security:
+  tls:
+    enabled: true
+    min_version: "1.3"
+    cert_path: /etc/argus/core.crt
+    key_path: /etc/argus/core.key
+    ca_path: /etc/argus/ca.crt
+  auth:
+    agent_mtls: true
+    dashboard_oidc: true
+    enrollment_token_ttl: 30m
+  audit:
+    enabled: true
+    output: /var/log/argus/audit.jsonl
+
+storage:
+  type: jsonl
+  event_store: /var/lib/argus/core/events.jsonl
+  clickhouse:
+    enabled: false
+    dsn_ref: vault://argus/clickhouse/dsn
+
+detection:
+  rules_path: /etc/argus/rules
+  reload_interval: 30s
+  fail_closed: false
+
+alerting:
+  dedup_window: 5m
+  output: /var/lib/argus/core/alerts.jsonl
