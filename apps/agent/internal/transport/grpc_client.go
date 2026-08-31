@@ -126,8 +126,22 @@ func (c *GRPCClient) Send(msg *EventEnvelope) error {
 	if c == nil || c.client == nil || msg == nil {
 		return nil
 	}
-	_, err := c.client.SubmitEvent(context.Background(), EventEnvelopeToProto(msg))
-	return err
+	// Use a bounded retry with exponential backoff to improve robustness
+	var lastErr error
+	maxAttempts := 3
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		_, err := c.client.SubmitEvent(ctx, EventEnvelopeToProto(msg))
+		cancel()
+		if err == nil {
+			return nil
+		}
+		lastErr = err
+		// simple exponential backoff
+		backoff := time.Duration(1<<uint(attempt)) * time.Second
+		time.Sleep(backoff)
+	}
+	return lastErr
 }
 
 // Close releases the underlying gRPC connection when present.
