@@ -6,6 +6,7 @@ import (
 	"crypto/x509"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"strings"
@@ -72,6 +73,43 @@ func (s *Server) SubmitEvent(ctx context.Context, in *agentpb.EventEnvelope) (*a
 		_ = processor.ProcessEvent(ctx, ev)
 	}
 	return &agentpb.SubmitEventResponse{Accepted: true, Message: "event accepted"}, nil
+}
+
+// SubmitEvents handles a client-side stream of EventEnvelope messages and replies with a single ack.
+func (s *Server) SubmitEvents(stream agentpb.AgentService_SubmitEventsServer) error {
+	if s == nil || s.store == nil {
+		return status.Error(codes.FailedPrecondition, "event store is not configured")
+	}
+	var ids []string
+	for {
+		in, err := stream.Recv()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return status.Error(codes.Internal, err.Error())
+		}
+		ev, err := eventFromEnvelope(in)
+		if err != nil {
+			// skip invalid envelopes
+			continue
+		}
+		if ev.ReceivedAt == "" {
+			ev.StampReceivedAt(s.now)
+		}
+		if err := s.store.SaveEvent(stream.Context(), ev); err != nil {
+			return status.Error(codes.Internal, err.Error())
+		}
+		for _, processor := range s.processors {
+			if processor == nil {
+				continue
+			}
+			_ = processor.ProcessEvent(stream.Context(), ev)
+		}
+		ids = append(ids, ev.EventID)
+	}
+	ack := &agentpb.SubmitEventAck{Accepted: true, EventId: ids}
+	return stream.SendAndClose(ack)
 }
 
 func eventFromEnvelope(in *agentpb.EventEnvelope) (events.Event, error) {
