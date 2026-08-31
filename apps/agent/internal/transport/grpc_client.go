@@ -157,28 +157,50 @@ func (c *GRPCClient) SendBatch(msgs []*EventEnvelope) error {
 	if c == nil || c.client == nil || len(msgs) == 0 {
 		return nil
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-	stream, err := c.client.SubmitEvents(ctx)
-	if err != nil {
-		return err
-	}
-	for _, m := range msgs {
-		if m == nil {
+	var lastErr error
+	maxAttempts := 3
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		stream, err := c.client.SubmitEvents(ctx)
+		if err != nil {
+			lastErr = err
+			cancel()
+			// backoff and retry
+			time.Sleep(time.Duration(1<<uint(attempt)) * time.Second)
 			continue
 		}
-		if err := stream.Send(EventEnvelopeToProto(m)); err != nil {
-			return err
+		sendErr := error(nil)
+		for _, m := range msgs {
+			if m == nil {
+				continue
+			}
+			if err := stream.Send(EventEnvelopeToProto(m)); err != nil {
+				sendErr = err
+				break
+			}
 		}
+		if sendErr != nil {
+			_ = stream.CloseSend()
+			cancel()
+			lastErr = sendErr
+			time.Sleep(time.Duration(1<<uint(attempt)) * time.Second)
+			continue
+		}
+		ack, err := stream.CloseAndRecv()
+		cancel()
+		if err != nil {
+			lastErr = err
+			time.Sleep(time.Duration(1<<uint(attempt)) * time.Second)
+			continue
+		}
+		if ack == nil || !ack.GetAccepted() {
+			lastErr = fmt.Errorf("batch not accepted: %v", ack)
+			time.Sleep(time.Duration(1<<uint(attempt)) * time.Second)
+			continue
+		}
+		return nil
 	}
-	ack, err := stream.CloseAndRecv()
-	if err != nil {
-		return err
-	}
-	if ack == nil || !ack.GetAccepted() {
-		return fmt.Errorf("batch not accepted: %v", ack)
-	}
-	return nil
+	return lastErr
 }
 
 // EventEnvelopeToProto converts the app envelope into the gRPC contract message.
