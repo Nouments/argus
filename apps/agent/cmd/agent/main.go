@@ -15,18 +15,20 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"os/signal"
 	"path/filepath"
-	"strings"
 	"runtime"
+	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/Nouments/argus/apps/agent/internal/auth"
 	"github.com/Nouments/argus/apps/agent/internal/buffer"
 	"github.com/Nouments/argus/apps/agent/internal/collector"
-	"github.com/Nouments/argus/apps/agent/internal/collector/windows"
 	"github.com/Nouments/argus/apps/agent/internal/collector/linux/packages"
 	"github.com/Nouments/argus/apps/agent/internal/collector/linux/services"
+	"github.com/Nouments/argus/apps/agent/internal/collector/windows"
 	"github.com/Nouments/argus/apps/agent/internal/event"
 	"github.com/Nouments/argus/apps/agent/internal/pipeline"
 	"github.com/Nouments/argus/apps/agent/internal/storage"
@@ -199,10 +201,14 @@ func main() {
 		return
 	}
 	fmt.Printf("grpc gateway accepted event: %s\n", ev.EventID)
-	// keep running (collector loop) until interrupted
-	defer cancel()
+	// wait for termination signal and shutdown gracefully
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
+	<-sigCh
+	log.Println("shutdown signal received, stopping collectors...")
+	cancel()
 	wg.Wait()
-	select {}
+	log.Println("shutdown complete")
 }
 
 // runCollectorLoop periodically runs the pipeline, converts payloads to envelopes and sends them.

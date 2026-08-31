@@ -8,14 +8,14 @@ import (
 
 func TestParsePackageOutputs_DpkgAndPacman(t *testing.T) {
 	results := map[string]string{
-		"dpkg":   "openssl@1.1.1f-1\nnginx@1.18.0-1\n",
-		"pacman": "bash 5.1.8-1\ncoreutils 8.32-4\n",
-		"snap":   "Name   Version    Rev   Publisher   Notes\ncore   16-2       1234  canonical   -\n",
+		"dpkg":    "openssl@1.1.1f-1\nnginx@1.18.0-1\n",
+		"pacman":  "bash 5.1.8-1\ncoreutils 8.32-4\n",
+		"snap":    "Name   Version    Rev   Publisher   Notes\ncore   16-2       1234  canonical   -\n",
 		"flatpak": "org.gnome.Platform 3.38 1.2\n",
-		"dnf":    "bash.x86_64 5.1.8-1.el8@installed\nvim.x86_64 8.2.0-1.el8@installed\n",
-		"yum":    "httpd.x86_64 2.4.37-21.el8@installed\n",
-		"brew":   "openssl@1.1 1.1.1q\n",
-		"apk":    "busybox-1.33.1-r0\n",
+		"dnf":     "bash.x86_64 5.1.8-1.el8@installed\nvim.x86_64 8.2.0-1.el8@installed\n",
+		"yum":     "httpd.x86_64 2.4.37-21.el8@installed\n",
+		"brew":    "openssl@1.1 1.1.1q\n",
+		"apk":     "busybox-1.33.1-r0\n",
 	}
 	pkgs := parsePackageOutputs(results)
 	if len(pkgs) != 11 {
