@@ -22,7 +22,10 @@ import (
 
 	"github.com/Nouments/argus/apps/agent/internal/auth"
 	"github.com/Nouments/argus/apps/agent/internal/buffer"
+	"github.com/Nouments/argus/apps/agent/internal/collector"
+	"github.com/Nouments/argus/apps/agent/internal/collector/windows"
 	"github.com/Nouments/argus/apps/agent/internal/event"
+	"github.com/Nouments/argus/apps/agent/internal/pipeline"
 	"github.com/Nouments/argus/apps/agent/internal/storage"
 	"github.com/Nouments/argus/apps/agent/internal/transport"
 )
@@ -111,6 +114,11 @@ func main() {
 		log.Fatalf("configure grpc client: %v", err)
 	}
 	defer grpcClient.Close()
+
+	// Register available collectors (include Windows sample collector)
+	reg := collector.NewRegistry()
+	_ = reg.Register(windows.NewSampleCollector())
+	_ = pipeline.New(reg, nil)
 
 	sample, err := buildSampleEvent()
 	if err != nil {
