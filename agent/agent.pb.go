@@ -25,22 +25,21 @@ type EventEnvelope struct {
 	sizeCache     protoimpl.SizeCache
 	unknownFields protoimpl.UnknownFields
 
-	EventId   string `protobuf:"bytes,1,opt,name=event_id,json=eventId,proto3" json:"event_id,omitempty"`
-	Timestamp string `protobuf:"bytes,2,opt,name=timestamp,proto3" json:"timestamp,omitempty"`
-	SiteId    string `protobuf:"bytes,3,opt,name=site_id,json=siteId,proto3" json:"site_id,omitempty"`
-	AgentId   string `protobuf:"bytes,4,opt,name=agent_id,json=agentId,proto3" json:"agent_id,omitempty"`
-	EventType string `protobuf:"bytes,5,opt,name=event_type,json=eventType,proto3" json:"event_type,omitempty"`
-	Severity  string `protobuf:"bytes,6,opt,name=severity,proto3" json:"severity,omitempty"`
-	Host      string `protobuf:"bytes,7,opt,name=host,proto3" json:"host,omitempty"`
-	Raw       string `protobuf:"bytes,8,opt,name=raw,proto3" json:"raw,omitempty"`
-	Integrity string `protobuf:"bytes,9,opt,name=integrity,proto3" json:"integrity,omitempty"`
-	// Extended fields from cahier-de-charge
+	EventId    string            `protobuf:"bytes,1,opt,name=event_id,json=eventId,proto3" json:"event_id,omitempty"`
+	Timestamp  string            `protobuf:"bytes,2,opt,name=timestamp,proto3" json:"timestamp,omitempty"`
+	SiteId     string            `protobuf:"bytes,3,opt,name=site_id,json=siteId,proto3" json:"site_id,omitempty"`
+	AgentId    string            `protobuf:"bytes,4,opt,name=agent_id,json=agentId,proto3" json:"agent_id,omitempty"`
+	EventType  string            `protobuf:"bytes,5,opt,name=event_type,json=eventType,proto3" json:"event_type,omitempty"`
+	Severity   string            `protobuf:"bytes,6,opt,name=severity,proto3" json:"severity,omitempty"`
+	Host       string            `protobuf:"bytes,7,opt,name=host,proto3" json:"host,omitempty"`
+	Raw        string            `protobuf:"bytes,8,opt,name=raw,proto3" json:"raw,omitempty"`
+	Integrity  string            `protobuf:"bytes,9,opt,name=integrity,proto3" json:"integrity,omitempty"`
 	User       string            `protobuf:"bytes,10,opt,name=user,proto3" json:"user,omitempty"`
 	SrcIp      string            `protobuf:"bytes,11,opt,name=src_ip,json=srcIp,proto3" json:"src_ip,omitempty"`
 	DstIp      string            `protobuf:"bytes,12,opt,name=dst_ip,json=dstIp,proto3" json:"dst_ip,omitempty"`
 	Labels     map[string]string `protobuf:"bytes,13,rep,name=labels,proto3" json:"labels,omitempty" protobuf_key:"bytes,1,opt,name=key,proto3" protobuf_val:"bytes,2,opt,name=value,proto3"`
-	Normalized []byte            `protobuf:"bytes,14,opt,name=normalized,proto3" json:"normalized,omitempty"` // JSON-encoded normalized object
-	Enrichment []byte            `protobuf:"bytes,15,opt,name=enrichment,proto3" json:"enrichment,omitempty"` // JSON-encoded enrichment object
+	Normalized []byte            `protobuf:"bytes,14,opt,name=normalized,proto3" json:"normalized,omitempty"`
+	Enrichment []byte            `protobuf:"bytes,15,opt,name=enrichment,proto3" json:"enrichment,omitempty"`
 }
 
 func (x *EventEnvelope) Reset() {
@@ -239,7 +238,7 @@ type SubmitEventAck struct {
 	Accepted  bool     `protobuf:"varint,1,opt,name=accepted,proto3" json:"accepted,omitempty"`
 	Reason    string   `protobuf:"bytes,2,opt,name=reason,proto3" json:"reason,omitempty"`
 	Retryable bool     `protobuf:"varint,3,opt,name=retryable,proto3" json:"retryable,omitempty"`
-	EventId   []string `protobuf:"bytes,4,rep,name=event_id,json=eventId,proto3" json:"event_id,omitempty"` // IDs for which ack applies
+	EventId   []string `protobuf:"bytes,4,rep,name=event_id,json=eventId,proto3" json:"event_id,omitempty"`
 }
 
 func (x *SubmitEventAck) Reset() {

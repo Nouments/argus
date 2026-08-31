@@ -152,6 +152,35 @@ func (c *GRPCClient) Close() error {
 	return c.conn.Close()
 }
 
+// SendBatch sends multiple envelopes using the client-side streaming RPC SubmitEvents.
+func (c *GRPCClient) SendBatch(msgs []*EventEnvelope) error {
+	if c == nil || c.client == nil || len(msgs) == 0 {
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	stream, err := c.client.SubmitEvents(ctx)
+	if err != nil {
+		return err
+	}
+	for _, m := range msgs {
+		if m == nil {
+			continue
+		}
+		if err := stream.Send(EventEnvelopeToProto(m)); err != nil {
+			return err
+		}
+	}
+	ack, err := stream.CloseAndRecv()
+	if err != nil {
+		return err
+	}
+	if ack == nil || !ack.GetAccepted() {
+		return fmt.Errorf("batch not accepted: %v", ack)
+	}
+	return nil
+}
+
 // EventEnvelopeToProto converts the app envelope into the gRPC contract message.
 func EventEnvelopeToProto(msg *EventEnvelope) *agentpb.EventEnvelope {
 	if msg == nil {

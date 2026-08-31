@@ -29,7 +29,7 @@ const (
 type AgentServiceClient interface {
 	// Unary RPC retained for compatibility
 	SubmitEvent(ctx context.Context, in *EventEnvelope, opts ...grpc.CallOption) (*SubmitEventResponse, error)
-	// Client-side streaming RPC for batching and reliable ingestion
+	// Client-side streaming for batching
 	SubmitEvents(ctx context.Context, opts ...grpc.CallOption) (grpc.ClientStreamingClient[EventEnvelope, SubmitEventAck], error)
 }
 
@@ -70,7 +70,7 @@ type AgentService_SubmitEventsClient = grpc.ClientStreamingClient[EventEnvelope,
 type AgentServiceServer interface {
 	// Unary RPC retained for compatibility
 	SubmitEvent(context.Context, *EventEnvelope) (*SubmitEventResponse, error)
-	// Client-side streaming RPC for batching and reliable ingestion
+	// Client-side streaming for batching
 	SubmitEvents(grpc.ClientStreamingServer[EventEnvelope, SubmitEventAck]) error
 	mustEmbedUnimplementedAgentServiceServer()
 }
