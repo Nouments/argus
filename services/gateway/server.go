@@ -59,8 +59,106 @@ type Server struct {
 	ingestionConn   *grpc.ClientConn
 }
 
+// revokedSessions holds revoked session IDs and optional expiry.
+var revokedMu sync.RWMutex
+var revokedSessions = make(map[string]time.Time)
+
+// enrollmentTokens stores issued enrollment tokens and expiry; single-use token is removed when consumed.
+var enrollMu sync.RWMutex
+var enrollmentTokens = make(map[string]time.Time)
+
+// machine registry: map hashed fingerprint -> record
+type machineRecord struct {
+	AgentID  string
+	SiteID   string
+	Hostname string
+	LastIP   string
+	LastSeen time.Time
+}
+
+var machinesMu sync.RWMutex
+var machineRegistry = make(map[string]machineRecord)
+
+// addEnrollmentToken stores a token issued for enrollment
+func addEnrollmentToken(token string, exp time.Time) {
+	enrollMu.Lock()
+	defer enrollMu.Unlock()
+	enrollmentTokens[token] = exp
+	// persist
+	_ = saveBucketData("enroll", enrollmentTokens)
+}
+
+// validateAndConsumeEnrollment checks token exists, not expired and consumes it (single-use)
+func validateAndConsumeEnrollment(token string) bool {
+	enrollMu.Lock()
+	defer enrollMu.Unlock()
+	exp, ok := enrollmentTokens[token]
+	if !ok {
+		return false
+	}
+	if !exp.IsZero() && time.Now().After(exp) {
+		delete(enrollmentTokens, token)
+		_ = saveBucketData("enroll", enrollmentTokens)
+		return false
+	}
+	// consume
+	delete(enrollmentTokens, token)
+	_ = saveBucketData("enroll", enrollmentTokens)
+	return true
+}
+
+// registerOrUpdateMachine records machine fingerprint info
+func registerOrUpdateMachine(fingerprint, agentID, siteID, hostname, ip string) {
+	machinesMu.Lock()
+	defer machinesMu.Unlock()
+	machineRegistry[fingerprint] = machineRecord{AgentID: agentID, SiteID: siteID, Hostname: hostname, LastIP: ip, LastSeen: time.Now()}
+	_ = saveBucketData("machines", machineRegistry)
+}
+
+// findMachineByFingerprint checks registry
+func findMachineByFingerprint(fingerprint string) (machineRecord, bool) {
+	machinesMu.RLock()
+	defer machinesMu.RUnlock()
+	m, ok := machineRegistry[fingerprint]
+	return m, ok
+}
+
+// RevokeSession revokes the given session id until optional expiry (zero = indefinite).
+func RevokeSession(sessionID string, until time.Time) {
+	revokedMu.Lock()
+	defer revokedMu.Unlock()
+	revokedSessions[sessionID] = until
+	_ = saveBucketData("revoked", revokedSessions)
+}
+
+// IsSessionRevoked checks whether a session is revoked.
+func IsSessionRevoked(sessionID string) bool {
+	revokedMu.RLock()
+	defer revokedMu.RUnlock()
+	if exp, ok := revokedSessions[sessionID]; ok {
+		if exp.IsZero() {
+			return true
+		}
+		if time.Now().Before(exp) {
+			return true
+		}
+		// expired — cleanup
+		go func() {
+			revokedMu.Lock()
+			delete(revokedSessions, sessionID)
+			revokedMu.Unlock()
+			_ = saveBucketData("revoked", revokedSessions)
+		}()
+	}
+	return false
+}
+
 // NewServer creates a gateway server instance.
 func NewServer() *Server {
+	// try to load persisted maps if present
+	_ = loadBucketData("enroll", &enrollmentTokens)
+	_ = loadBucketData("revoked", &revokedSessions)
+	_ = loadBucketData("machines", &machineRegistry)
 	return &Server{workers: 8, refresh: make(map[string]refreshRecord)}
 }
 
@@ -96,7 +194,11 @@ func authInterceptor(ctx context.Context, req interface{}, info *grpc.UnaryServe
 	// try to validate as a session/access token (strip optional "Bearer " prefix)
 	if strings.HasPrefix(strings.TrimSpace(token), "Bearer ") {
 		t := strings.TrimSpace(strings.TrimPrefix(token, "Bearer "))
-		if _, err := ValidateAccessToken(t); err == nil {
+		if claims, err := ValidateAccessToken(t); err == nil {
+			// check revocation by session id
+			if claims.SessionID != "" && IsSessionRevoked(claims.SessionID) {
+				return nil, status.Error(codes.Unauthenticated, "revoked session")
+			}
 			return handler(ctx, req)
 		}
 	}
@@ -200,7 +302,13 @@ func IssueEnrollmentToken(agentID, siteID string) (string, error) {
 		SessionID: "enroll-" + agentID + "-" + siteID,
 		TokenType: "enrollment",
 	}
-	return issueSignedToken(secret, claims)
+	token, err := issueSignedToken(secret, claims)
+	if err != nil {
+		return "", err
+	}
+	// store as single-use enrollment token
+	addEnrollmentToken(token, time.Unix(claims.ExpiresAt, 0))
+	return token, nil
 }
 
 func IssueSessionPair(agentID, siteID string) (*sessionPair, error) {

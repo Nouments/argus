@@ -135,6 +135,34 @@ func NewSecureGRPCClient(ctx context.Context, target, certPath, keyPath, caPath 
 	return NewGRPCClient(ctx, target, opts...)
 }
 
+// NewSecureGRPCClientWithBearer creates a TLS-enabled gRPC client and configures an outgoing bearer token.
+func NewSecureGRPCClientWithBearer(ctx context.Context, target, bearer, certPath, keyPath, caPath string) (*GRPCClient, error) {
+	tlsConfig := &tls.Config{MinVersion: tls.VersionTLS13}
+	opts := []grpc.DialOption{grpc.WithTransportCredentials(insecure.NewCredentials())}
+	if certPath != "" || keyPath != "" || caPath != "" {
+		if certPath != "" && keyPath != "" {
+			cert, err := tls.LoadX509KeyPair(certPath, keyPath)
+			if err != nil {
+				return nil, fmt.Errorf("load client cert: %w", err)
+			}
+			tlsConfig.Certificates = []tls.Certificate{cert}
+		}
+		if caPath != "" {
+			caPEM, err := os.ReadFile(caPath)
+			if err != nil {
+				return nil, fmt.Errorf("read CA cert: %w", err)
+			}
+			pool := x509.NewCertPool()
+			if !pool.AppendCertsFromPEM(caPEM) {
+				return nil, fmt.Errorf("parse CA certificate")
+			}
+			tlsConfig.RootCAs = pool
+		}
+		opts = []grpc.DialOption{grpc.WithTransportCredentials(credentials.NewTLS(tlsConfig))}
+	}
+	return NewGRPCClientWithBearer(ctx, target, bearer, opts...)
+}
+
 // Send implements the transport contract by encoding an application envelope into the generated protobuf message.
 func (c *GRPCClient) Send(msg *EventEnvelope) error {
 	if c == nil || c.client == nil || msg == nil {

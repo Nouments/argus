@@ -26,14 +26,14 @@ import (
 	"github.com/Nouments/argus/apps/agent/internal/auth"
 	"github.com/Nouments/argus/apps/agent/internal/buffer"
 	"github.com/Nouments/argus/apps/agent/internal/collector"
-	"github.com/Nouments/argus/apps/agent/internal/collector/linux/packages"
-	"github.com/Nouments/argus/apps/agent/internal/collector/linux/services"
-	"github.com/Nouments/argus/apps/agent/internal/collector/linux/logs"
-	"github.com/Nouments/argus/apps/agent/internal/collector/linux/process"
-	"github.com/Nouments/argus/apps/agent/internal/collector/linux/network"
 	"github.com/Nouments/argus/apps/agent/internal/collector/linux/filesystem"
-	"github.com/Nouments/argus/apps/agent/internal/collector/linux/security"
 	"github.com/Nouments/argus/apps/agent/internal/collector/linux/inventory"
+	"github.com/Nouments/argus/apps/agent/internal/collector/linux/logs"
+	"github.com/Nouments/argus/apps/agent/internal/collector/linux/network"
+	"github.com/Nouments/argus/apps/agent/internal/collector/linux/packages"
+	"github.com/Nouments/argus/apps/agent/internal/collector/linux/process"
+	"github.com/Nouments/argus/apps/agent/internal/collector/linux/security"
+	"github.com/Nouments/argus/apps/agent/internal/collector/linux/services"
 	"github.com/Nouments/argus/apps/agent/internal/collector/windows"
 	"github.com/Nouments/argus/apps/agent/internal/event"
 	"github.com/Nouments/argus/apps/agent/internal/pipeline"
@@ -120,7 +120,26 @@ func main() {
 		log.Fatalf("gateway target: %v", err)
 	}
 
-	grpcClient, err := transport.NewSecureGRPCClient(context.Background(), grpcTarget, *certPath, *keyPath, *caPath)
+	// create HTTP client for enrollment (re-uses certs when provided)
+	httpClient, err := newHTTPClient(*certPath, *keyPath, *caPath)
+	if err != nil {
+		log.Fatalf("configure http client: %v", err)
+	}
+
+	// attempt to load stored session; if missing, perform enrollment flow
+	var accessToken string
+	if sess, err := auth.LoadSession(); err == nil && sess != nil {
+		accessToken = sess.AccessToken
+	} else {
+		log.Println("no stored session, performing enrollment with gateway")
+		sess, err := auth.Enroll(context.Background(), httpClient, *gatewayURL, resolveAgentID(), resolveSiteID())
+		if err != nil {
+			log.Fatalf("enrollment failed: %v", err)
+		}
+		accessToken = sess.AccessToken
+	}
+
+	grpcClient, err := transport.NewSecureGRPCClientWithBearer(context.Background(), grpcTarget, accessToken, *certPath, *keyPath, *caPath)
 	if err != nil {
 		log.Fatalf("configure grpc client: %v", err)
 	}
