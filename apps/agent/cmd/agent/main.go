@@ -28,6 +28,12 @@ import (
 	"github.com/Nouments/argus/apps/agent/internal/collector"
 	"github.com/Nouments/argus/apps/agent/internal/collector/linux/packages"
 	"github.com/Nouments/argus/apps/agent/internal/collector/linux/services"
+	"github.com/Nouments/argus/apps/agent/internal/collector/linux/logs"
+	"github.com/Nouments/argus/apps/agent/internal/collector/linux/process"
+	"github.com/Nouments/argus/apps/agent/internal/collector/linux/network"
+	"github.com/Nouments/argus/apps/agent/internal/collector/linux/filesystem"
+	"github.com/Nouments/argus/apps/agent/internal/collector/linux/security"
+	"github.com/Nouments/argus/apps/agent/internal/collector/linux/inventory"
 	"github.com/Nouments/argus/apps/agent/internal/collector/windows"
 	"github.com/Nouments/argus/apps/agent/internal/event"
 	"github.com/Nouments/argus/apps/agent/internal/pipeline"
@@ -134,6 +140,14 @@ func main() {
 		// Linux/Unix collectors
 		_ = reg.Register(packages.NewPackageCollector())
 		_ = reg.Register(services.NewServicesCollector())
+		// additional Linux collectors
+		_ = reg.Register(logs.NewSyslogCollector())
+		_ = reg.Register(logs.NewJournalCollector())
+		_ = reg.Register(process.NewProcessCollector())
+		_ = reg.Register(network.NewNetworkCollector())
+		_ = reg.Register(filesystem.NewFilesystemCollector())
+		_ = reg.Register(security.NewAuditCollector())
+		_ = reg.Register(inventory.NewHostCollector())
 	}
 	p := pipeline.New(reg, nil)
 

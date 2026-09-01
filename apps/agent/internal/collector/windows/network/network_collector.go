@@ -20,4 +20,4 @@ func (n *networkCollector) Collect() ([]byte, error) {
 	return b, nil
 }
 
-func NewNetworkCollector() collector.Collector { return &networkCollector{} }
+func NewWindowsNetworkCollector() collector.Collector { return &networkCollector{} }

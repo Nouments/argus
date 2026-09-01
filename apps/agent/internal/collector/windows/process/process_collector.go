@@ -20,4 +20,7 @@ func (p *processCollector) Collect() ([]byte, error) {
 	return b, nil
 }
 
-func NewProcessCollector() collector.Collector { return &processCollector{} }
+// NewProcessCollectorWindows returns a new Windows process collector.
+// Named uniquely to avoid redeclaration when multiple platform-specific
+// implementations are present.
+func NewProcessCollectorWindows() collector.Collector { return &processCollector{} }

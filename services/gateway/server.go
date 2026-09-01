@@ -88,10 +88,19 @@ func authInterceptor(ctx context.Context, req interface{}, info *grpc.UnaryServe
 	if info == nil || info.FullMethod == "" {
 		return handler(ctx, req)
 	}
-	if !validateGatewayToken(readBearerTokenFromContext(ctx)) {
-		return nil, status.Error(codes.Unauthenticated, "invalid or missing bearer token")
+	// allow either the static gateway token (for management) or a signed session token
+	token := readBearerTokenFromContext(ctx)
+	if validateGatewayToken(token) {
+		return handler(ctx, req)
 	}
-	return handler(ctx, req)
+	// try to validate as a session/access token (strip optional "Bearer " prefix)
+	if strings.HasPrefix(strings.TrimSpace(token), "Bearer ") {
+		t := strings.TrimSpace(strings.TrimPrefix(token, "Bearer "))
+		if _, err := ValidateAccessToken(t); err == nil {
+			return handler(ctx, req)
+		}
+	}
+	return nil, status.Error(codes.Unauthenticated, "invalid or missing bearer token")
 }
 
 func readBearerTokenFromContext(ctx context.Context) string {
