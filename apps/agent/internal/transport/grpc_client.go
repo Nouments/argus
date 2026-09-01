@@ -7,11 +7,13 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"strings"
 	"time"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/metadata"
 
 	"github.com/Nouments/argus/apps/agent/internal/event"
 	agentpb "github.com/Nouments/argus/proto/agent"
@@ -76,6 +78,8 @@ func EnvelopeToEvent(msg *EventEnvelope) (*event.Event, error) {
 type GRPCClient struct {
 	conn   *grpc.ClientConn
 	client agentpb.AgentServiceClient
+	// optional bearer token to attach as outgoing metadata
+	bearerToken string
 }
 
 // NewGRPCClient creates a gRPC client bound to a target and optional dial options.
@@ -91,6 +95,16 @@ func NewGRPCClient(ctx context.Context, target string, opts ...grpc.DialOption) 
 		conn:   conn,
 		client: agentpb.NewAgentServiceClient(conn),
 	}, nil
+}
+
+// NewGRPCClientWithBearer creates a gRPC client and configures an outgoing bearer token.
+func NewGRPCClientWithBearer(ctx context.Context, target, bearer string, opts ...grpc.DialOption) (*GRPCClient, error) {
+	c, err := NewGRPCClient(ctx, target, opts...)
+	if err != nil {
+		return nil, err
+	}
+	c.bearerToken = strings.TrimSpace(bearer)
+	return c, nil
 }
 
 // NewSecureGRPCClient creates a TLS-enabled gRPC client using mTLS when certificates are provided.
@@ -121,6 +135,34 @@ func NewSecureGRPCClient(ctx context.Context, target, certPath, keyPath, caPath 
 	return NewGRPCClient(ctx, target, opts...)
 }
 
+// NewSecureGRPCClientWithBearer creates a TLS-enabled gRPC client and configures an outgoing bearer token.
+func NewSecureGRPCClientWithBearer(ctx context.Context, target, bearer, certPath, keyPath, caPath string) (*GRPCClient, error) {
+	tlsConfig := &tls.Config{MinVersion: tls.VersionTLS13}
+	opts := []grpc.DialOption{grpc.WithTransportCredentials(insecure.NewCredentials())}
+	if certPath != "" || keyPath != "" || caPath != "" {
+		if certPath != "" && keyPath != "" {
+			cert, err := tls.LoadX509KeyPair(certPath, keyPath)
+			if err != nil {
+				return nil, fmt.Errorf("load client cert: %w", err)
+			}
+			tlsConfig.Certificates = []tls.Certificate{cert}
+		}
+		if caPath != "" {
+			caPEM, err := os.ReadFile(caPath)
+			if err != nil {
+				return nil, fmt.Errorf("read CA cert: %w", err)
+			}
+			pool := x509.NewCertPool()
+			if !pool.AppendCertsFromPEM(caPEM) {
+				return nil, fmt.Errorf("parse CA certificate")
+			}
+			tlsConfig.RootCAs = pool
+		}
+		opts = []grpc.DialOption{grpc.WithTransportCredentials(credentials.NewTLS(tlsConfig))}
+	}
+	return NewGRPCClientWithBearer(ctx, target, bearer, opts...)
+}
+
 // Send implements the transport contract by encoding an application envelope into the generated protobuf message.
 func (c *GRPCClient) Send(msg *EventEnvelope) error {
 	if c == nil || c.client == nil || msg == nil {
@@ -130,7 +172,12 @@ func (c *GRPCClient) Send(msg *EventEnvelope) error {
 	var lastErr error
 	maxAttempts := 3
 	for attempt := 1; attempt <= maxAttempts; attempt++ {
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		// build base context and attach authorization metadata when configured
+		baseCtx := context.Background()
+		if c != nil && strings.TrimSpace(c.bearerToken) != "" {
+			baseCtx = metadata.AppendToOutgoingContext(baseCtx, "authorization", "Bearer "+c.bearerToken)
+		}
+		ctx, cancel := context.WithTimeout(baseCtx, 10*time.Second)
 		_, err := c.client.SubmitEvent(ctx, EventEnvelopeToProto(msg))
 		cancel()
 		if err == nil {
@@ -160,7 +207,11 @@ func (c *GRPCClient) SendBatch(msgs []*EventEnvelope) error {
 	var lastErr error
 	maxAttempts := 3
 	for attempt := 1; attempt <= maxAttempts; attempt++ {
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		baseCtx := context.Background()
+		if c != nil && strings.TrimSpace(c.bearerToken) != "" {
+			baseCtx = metadata.AppendToOutgoingContext(baseCtx, "authorization", "Bearer "+c.bearerToken)
+		}
+		ctx, cancel := context.WithTimeout(baseCtx, 30*time.Second)
 		stream, err := c.client.SubmitEvents(ctx)
 		if err != nil {
 			lastErr = err

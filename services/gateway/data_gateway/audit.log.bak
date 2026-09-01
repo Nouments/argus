@@ -1,0 +1,3 @@
+{"event":"enroll_issued","payload":{"agent_id":"agent-bb2996a2","expires_at":1788267870,"ip":"127.0.0.1:47270","site_id":"site-test"},"ts":"1788266070"}
+{"event":"session_issued","payload":{"agent_id":"agent-bb2996a2","fingerprint":"","ip":"127.0.0.1:47270","site_id":"site-test"},"ts":"1788266070"}
+{"event":"session_revoked","payload":{"by_ip":"127.0.0.1:47270","session_id":"sess-agent-bb2996a2-site-test-a968a566269a27c185efcab3347b0201","until":0},"ts":"1788266070"}
