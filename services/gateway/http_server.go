@@ -3,6 +3,7 @@ package gateway
 import (
 	"encoding/json"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 )
@@ -19,9 +20,30 @@ type enrollResponse struct {
 }
 
 // enrollHandler issues a short-lived enrollment token for the requesting agent.
+func requireOnboardingSecret(r *http.Request) bool {
+	secret := strings.TrimSpace(os.Getenv("ARGUS_ONBOARDING_SECRET"))
+	if secret == "" {
+		return false
+	}
+	if value := strings.TrimSpace(r.Header.Get("X-Argus-Secret")); value != "" {
+		return value == secret
+	}
+	if value := strings.TrimSpace(r.Header.Get("Authorization")); value != "" {
+		if !strings.HasPrefix(strings.TrimSpace(value), "Bearer ") {
+			return false
+		}
+		return strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(value), "Bearer ")) == secret
+	}
+	return false
+}
+
 func enrollHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if !requireOnboardingSecret(r) {
+		http.Error(w, "onboarding secret required", http.StatusUnauthorized)
 		return
 	}
 	var req enrollRequest

@@ -95,6 +95,16 @@ func resolveGatewayURL() (string, error) {
 	return normalizeGatewayURL(*gatewayURL)
 }
 
+func resolveGatewayGRPCTarget() (string, error) {
+	if raw := strings.TrimSpace(os.Getenv("ARGUS_GATEWAY_GRPC_ADDR")); raw != "" {
+		return grpcGatewayTarget(raw)
+	}
+	if raw := strings.TrimSpace(os.Getenv("ARGUS_GATEWAY_GRPC_URL")); raw != "" {
+		return grpcGatewayTarget(raw)
+	}
+	return grpcGatewayTarget(*gatewayURL)
+}
+
 func normalizeGatewayURL(rawURL string) (string, error) {
 	parsed, err := url.ParseRequestURI(rawURL)
 	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
@@ -115,7 +125,7 @@ func main() {
 	}
 	*gatewayURL = gateway
 
-	grpcTarget, err := grpcGatewayTarget(*gatewayURL)
+	grpcTarget, err := resolveGatewayGRPCTarget()
 	if err != nil {
 		log.Fatalf("gateway target: %v", err)
 	}

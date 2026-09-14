@@ -12,6 +12,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/Nouments/argus/apps/core/internal/admin"
 	"github.com/Nouments/argus/apps/core/internal/alerting"
 	"github.com/Nouments/argus/apps/core/internal/detection"
 	"github.com/Nouments/argus/apps/core/internal/ingestion"
@@ -76,6 +77,16 @@ func main() {
 				_ = metricsSrv.Close()
 			}
 		}()
+	}
+
+	adminAddr := envOrDefault("ARGUS_ADMIN_ADDR", ":8081")
+	if strings.TrimSpace(adminAddr) != "" {
+		go func() {
+			if err := admin.StartServer(adminAddr, *eventStorePath, *dataDir); err != nil && !strings.Contains(err.Error(), "use of closed network connection") {
+				log.Printf("admin dashboard server stopped: %v", err)
+			}
+		}()
+		log.Printf("admin dashboard listening on %s", adminAddr)
 	}
 
 	// Initialize mock ClickHouse writer and DLQ replayer using app-level storage.

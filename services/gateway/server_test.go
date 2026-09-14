@@ -53,8 +53,8 @@ func TestBuildServerOptionsWithMutualTLS(t *testing.T) {
 
 func TestValidateGatewayToken(t *testing.T) {
 	t.Setenv("ARGUS_GATEWAY_TOKEN", "")
-	if !validateGatewayToken("") {
-		t.Fatal("validateGatewayToken() should allow empty token configuration")
+	if validateGatewayToken("") {
+		t.Fatal("validateGatewayToken() should reject empty token configuration")
 	}
 
 	t.Setenv("ARGUS_GATEWAY_TOKEN", "super-secret")

@@ -8,7 +8,6 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"strings"
 	"testing"
 	"time"
@@ -43,9 +42,10 @@ func (d *dummyIngest) SubmitEvent(ctx context.Context, in *agentpb.EventEnvelope
 }
 
 func TestEnrollAndGRPCAuth(t *testing.T) {
-	os.Setenv("ARGUS_SESSION_SECRET", "test-secret-12345")
+	t.Setenv("ARGUS_SESSION_SECRET", "test-secret-12345")
+	t.Setenv("ARGUS_ONBOARDING_SECRET", "test-onboarding-secret")
 	// ensure static gateway token is set to prevent automatic allow
-	os.Setenv("ARGUS_GATEWAY_TOKEN", "disabled-static-token")
+	t.Setenv("ARGUS_GATEWAY_TOKEN", "disabled-static-token")
 	// Start HTTP test server with enroll/session/revoke handlers
 	mux := http.NewServeMux()
 	mux.HandleFunc("/enroll", enrollHandler)
@@ -64,7 +64,13 @@ func TestEnrollAndGRPCAuth(t *testing.T) {
 	// Enroll: POST /enroll
 	enrollReq := map[string]string{"agent_id": aid, "site_id": sid}
 	b := mustJSON(t, enrollReq)
-	resp, err := client.Post(ts.URL+"/enroll", "application/json", stringsNewReader(b))
+	reqEnroll, err := http.NewRequest(http.MethodPost, ts.URL+"/enroll", stringsNewReader(b))
+	if err != nil {
+		t.Fatalf("build enroll request: %v", err)
+	}
+	reqEnroll.Header.Set("Content-Type", "application/json")
+	reqEnroll.Header.Set("X-Argus-Secret", "test-onboarding-secret")
+	resp, err := client.Do(reqEnroll)
 	if err != nil {
 		t.Fatalf("enroll request failed: %v", err)
 	}
