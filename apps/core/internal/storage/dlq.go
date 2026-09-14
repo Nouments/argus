@@ -3,6 +3,7 @@ package storage
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 
 	agentpb "github.com/Nouments/argus/proto/agent"
 	bolt "go.etcd.io/bbolt"
@@ -11,34 +12,35 @@ import (
 
 const dlqBucket = "dlq"
 
-// DLQStore persists failed events in a BoltDB database.
 type DLQStore struct {
 	db *bolt.DB
 }
 
-// OpenDLQ opens or creates a BoltDB file at path.
 func OpenDLQ(path string) (*DLQStore, error) {
 	if path == "" {
 		return nil, fmt.Errorf("empty dlq path")
 	}
-	dir := os.DirFS(".") // ensure path creation by open with file mode
-	_ = dir
+	// ensure parent directory exists
+	if dir := filepath.Dir(path); dir != "" {
+		_ = os.MkdirAll(dir, 0o700)
+	}
 	db, err := bolt.Open(path, 0600, nil)
 	if err != nil {
 		return nil, err
 	}
-	err = db.Update(func(tx *bolt.Tx) error {
+	if err := db.Update(func(tx *bolt.Tx) error {
 		_, e := tx.CreateBucketIfNotExists([]byte(dlqBucket))
 		return e
-	})
-	if err != nil {
+	}); err != nil {
 		db.Close()
 		return nil, err
 	}
+	// set initial DLQ size metric
+	ds := &DLQStore{db: db}
+	ds.updateDLQGauge()
 	return &DLQStore{db: db}, nil
 }
 
-// Append serializes the event and stores it in the DLQ with an auto-increment key.
 func (d *DLQStore) Append(e *agentpb.EventEnvelope) error {
 	if e == nil {
 		return fmt.Errorf("nil event")
@@ -58,8 +60,34 @@ func (d *DLQStore) Append(e *agentpb.EventEnvelope) error {
 	})
 }
 
-// Next returns the first key and decoded EventEnvelope in the DLQ, or
-// (nil, nil, nil) if the DLQ is empty.
+// wrap Append to update gauge (bolt update will call this function after commit)
+func (d *DLQStore) AppendWithMetric(e *agentpb.EventEnvelope) error {
+	if err := d.Append(e); err != nil {
+		return err
+	}
+	d.updateDLQGauge()
+	return nil
+}
+
+func (d *DLQStore) updateDLQGauge() {
+	if d == nil || d.db == nil {
+		return
+	}
+	var count int
+	_ = d.db.View(func(tx *bolt.Tx) error {
+		bkt := tx.Bucket([]byte(dlqBucket))
+		if bkt == nil {
+			return nil
+		}
+		c := bkt.Cursor()
+		for k, _ := c.First(); k != nil; k, _ = c.Next() {
+			count++
+		}
+		return nil
+	})
+	DLQSize.Set(float64(count))
+}
+
 func (d *DLQStore) Next() ([]byte, *agentpb.EventEnvelope, error) {
 	var key []byte
 	var ev *agentpb.EventEnvelope
@@ -87,7 +115,6 @@ func (d *DLQStore) Next() ([]byte, *agentpb.EventEnvelope, error) {
 	return key, ev, err
 }
 
-// Delete removes the entry with the given key from the DLQ.
 func (d *DLQStore) Delete(key []byte) error {
 	if key == nil {
 		return fmt.Errorf("nil key")
@@ -101,7 +128,14 @@ func (d *DLQStore) Delete(key []byte) error {
 	})
 }
 
-// Close closes the underlying DB.
+func (d *DLQStore) DeleteWithMetric(key []byte) error {
+	if err := d.Delete(key); err != nil {
+		return err
+	}
+	d.updateDLQGauge()
+	return nil
+}
+
 func (d *DLQStore) Close() error {
 	if d.db == nil {
 		return nil

@@ -21,6 +21,7 @@ require (
 	github.com/nats-io/nuid v1.0.1 // indirect
 	github.com/paulmach/orb v0.13.0 // indirect
 	github.com/pierrec/lz4/v4 v4.1.27 // indirect
+	github.com/prometheus/client_golang v1.17.0 // indirect
 	github.com/segmentio/asm v1.2.1 // indirect
 	github.com/shopspring/decimal v1.4.0 // indirect
 	go.etcd.io/bbolt v1.3.10 // indirect

@@ -181,5 +181,35 @@ func (w *ClickHouseWriter) Close() error {
 // QueryEvents is a read-path stub to separate read vs write responsibilities.
 // Implement as needed for querying ClickHouse; returns not implemented for now.
 func (w *ClickHouseWriter) QueryEvents(ctx context.Context, siteID string, limit int) ([]*agentpb.EventEnvelope, error) {
-	return nil, fmt.Errorf("QueryEvents not implemented")
+	if w == nil || w.conn == nil {
+		return nil, fmt.Errorf("clickhouse writer not initialized")
+	}
+	if limit <= 0 {
+		limit = 100
+	}
+	q := `SELECT event_id, site_id, agent_id, raw, ts FROM events WHERE site_id = ? ORDER BY ts DESC LIMIT ?`
+	rows, err := w.conn.Query(ctx, q, siteID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var res []*agentpb.EventEnvelope
+	for rows.Next() {
+		var eventID, site, agent, raw string
+		var ts time.Time
+		if err := rows.Scan(&eventID, &site, &agent, &raw, &ts); err != nil {
+			return nil, err
+		}
+		res = append(res, &agentpb.EventEnvelope{
+			EventId:   eventID,
+			SiteId:    site,
+			AgentId:   agent,
+			Raw:       raw,
+			Timestamp: ts.UTC().Format(time.RFC3339),
+		})
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return res, nil
 }

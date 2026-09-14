@@ -4,6 +4,7 @@ import (
 	"context"
 	"flag"
 	"log"
+	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -60,8 +61,51 @@ func main() {
 		log.Fatalf("configure detection: %v", err)
 	}
 
+	// mock ClickHouse writer and DLQ will be initialized after context is created
+
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+
+	// start metrics server if requested
+	metricsAddr := envOrDefault("ARGUS_METRICS_ADDR", ":9090")
+	var metricsSrv *http.Server
+	if strings.TrimSpace(metricsAddr) != "" {
+		metricsSrv = storage.StartMetricsServer(metricsAddr)
+		defer func() {
+			if metricsSrv != nil {
+				_ = metricsSrv.Close()
+			}
+		}()
+	}
+
+	// Initialize mock ClickHouse writer and DLQ replayer using app-level storage.
+	chWriter, chErr := storage.NewClickHouseWriter()
+	if chErr != nil {
+		log.Printf("clickhouse writer init skipped: %v", chErr)
+	} else {
+		defer func() {
+			if err := chWriter.Close(); err != nil {
+				log.Printf("close clickhouse writer: %v", err)
+			}
+		}()
+		dlqPath := envOrDefault("ARGUS_DLQ_PATH", filepath.Join(*dataDir, "dlq.db"))
+		dlq, dlqErr := storage.OpenDLQ(dlqPath)
+		if dlqErr != nil {
+			log.Printf("open dlq failed: %v", dlqErr)
+		} else {
+			replayer := storage.NewReplayer(chWriter, dlq, 1000)
+			go func() {
+				if err := replayer.Start(ctx); err != nil {
+					log.Printf("dlq replayer stopped: %v", err)
+				}
+			}()
+			defer func() {
+				if err := dlq.Close(); err != nil {
+					log.Printf("close dlq: %v", err)
+				}
+			}()
+		}
+	}
 
 	log.Printf("argus-core listening on %s, event_store=%s", *grpcAddr, store.Path())
 	err = ingestion.RunGRPCServer(ctx, ingestion.Config{
