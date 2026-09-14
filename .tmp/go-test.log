@@ -1,0 +1,15 @@
+?   	github.com/Nouments/argus/apps/core/cmd/argus-core	[no test files]
+?   	github.com/Nouments/argus/apps/core/internal/admin	[no test files]
+ok  	github.com/Nouments/argus/apps/core/internal/alerting	(cached)
+ok  	github.com/Nouments/argus/apps/core/internal/detection	(cached)
+ok  	github.com/Nouments/argus/apps/core/internal/ingestion	(cached)
+ok  	github.com/Nouments/argus/apps/core/internal/rules	(cached)
+ok  	github.com/Nouments/argus/apps/core/internal/storage	(cached)
+?   	github.com/Nouments/argus/core/internal/ingestion	[no test files]
+?   	github.com/Nouments/argus/core/internal/storage	[no test files]
+ok  	github.com/Nouments/argus/pkg/events	(cached)
+?   	github.com/Nouments/argus/proto/agent	[no test files]
+ok  	github.com/Nouments/argus/services/gateway	0.223s
+?   	github.com/Nouments/argus/services/gateway/cmd/argus-gateway	[no test files]
+?   	github.com/Nouments/argus/tools/gateway_inspect	[no test files]
+?   	github.com/Nouments/argus/tools/gateway_migrate	[no test files]

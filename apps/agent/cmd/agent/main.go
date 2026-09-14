@@ -22,7 +22,7 @@ import (
 	"sync"
 	"syscall"
 	"time"
-
+	"net"
 	"github.com/Nouments/argus/apps/agent/internal/auth"
 	"github.com/Nouments/argus/apps/agent/internal/buffer"
 	"github.com/Nouments/argus/apps/agent/internal/collector"
@@ -479,14 +479,27 @@ func newHTTPClient(certPath, keyPath, caPath string) (*http.Client, error) {
 }
 
 func grpcGatewayTarget(rawURL string) (string, error) {
+	rawURL = strings.TrimSpace(rawURL)
+	if rawURL == "" {
+		return "", fmt.Errorf("empty gateway target")
+	}
+
+	// Accept a direct host:port gRPC address.
+	if !strings.Contains(rawURL, "://") {
+		if _, _, err := net.SplitHostPort(rawURL); err != nil {
+			return "", fmt.Errorf("invalid gateway target %q: %w", rawURL, err)
+		}
+		return rawURL, nil
+	}
+
 	parsed, err := url.Parse(rawURL)
 	if err != nil {
 		return "", err
 	}
-	if parsed.Host != "" {
-		return parsed.Host, nil
+	if parsed.Host == "" {
+		return "", fmt.Errorf("invalid gateway URL: %q", rawURL)
 	}
-	return rawURL, nil
+	return parsed.Host, nil
 }
 
 func shouldFallbackGatewayStatus(statusCode int) bool {
