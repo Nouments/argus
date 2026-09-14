@@ -32,3 +32,17 @@ go.work.sum
 # .vscode/
 cahier*
 bin/
+build/
+_output/
+# local go tool binaries
+gateway_*
+
+# Tool build outputs
+tools/**/bin/
+
+# Databases and runtime data
+*.db
+*.db.bak
+*.bak
+**/data_gateway/
+**/data_gateway/*

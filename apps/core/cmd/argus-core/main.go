@@ -4,6 +4,7 @@ import (
 	"context"
 	"flag"
 	"log"
+	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -11,6 +12,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/Nouments/argus/apps/core/internal/admin"
 	"github.com/Nouments/argus/apps/core/internal/alerting"
 	"github.com/Nouments/argus/apps/core/internal/detection"
 	"github.com/Nouments/argus/apps/core/internal/ingestion"
@@ -60,8 +62,61 @@ func main() {
 		log.Fatalf("configure detection: %v", err)
 	}
 
+	// mock ClickHouse writer and DLQ will be initialized after context is created
+
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+
+	// start metrics server if requested
+	metricsAddr := envOrDefault("ARGUS_METRICS_ADDR", ":9090")
+	var metricsSrv *http.Server
+	if strings.TrimSpace(metricsAddr) != "" {
+		metricsSrv = storage.StartMetricsServer(metricsAddr)
+		defer func() {
+			if metricsSrv != nil {
+				_ = metricsSrv.Close()
+			}
+		}()
+	}
+
+	adminAddr := envOrDefault("ARGUS_ADMIN_ADDR", ":8081")
+	if strings.TrimSpace(adminAddr) != "" {
+		go func() {
+			if err := admin.StartServer(adminAddr, *eventStorePath, *dataDir); err != nil && !strings.Contains(err.Error(), "use of closed network connection") {
+				log.Printf("admin dashboard server stopped: %v", err)
+			}
+		}()
+		log.Printf("admin dashboard listening on %s", adminAddr)
+	}
+
+	// Initialize mock ClickHouse writer and DLQ replayer using app-level storage.
+	chWriter, chErr := storage.NewClickHouseWriter()
+	if chErr != nil {
+		log.Printf("clickhouse writer init skipped: %v", chErr)
+	} else {
+		defer func() {
+			if err := chWriter.Close(); err != nil {
+				log.Printf("close clickhouse writer: %v", err)
+			}
+		}()
+		dlqPath := envOrDefault("ARGUS_DLQ_PATH", filepath.Join(*dataDir, "dlq.db"))
+		dlq, dlqErr := storage.OpenDLQ(dlqPath)
+		if dlqErr != nil {
+			log.Printf("open dlq failed: %v", dlqErr)
+		} else {
+			replayer := storage.NewReplayer(chWriter, dlq, 1000)
+			go func() {
+				if err := replayer.Start(ctx); err != nil {
+					log.Printf("dlq replayer stopped: %v", err)
+				}
+			}()
+			defer func() {
+				if err := dlq.Close(); err != nil {
+					log.Printf("close dlq: %v", err)
+				}
+			}()
+		}
+	}
 
 	log.Printf("argus-core listening on %s, event_store=%s", *grpcAddr, store.Path())
 	err = ingestion.RunGRPCServer(ctx, ingestion.Config{

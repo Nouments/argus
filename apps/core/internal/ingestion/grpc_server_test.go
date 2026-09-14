@@ -132,8 +132,8 @@ func TestSubmitEventRequiresStore(t *testing.T) {
 }
 
 func TestValidateBearerToken(t *testing.T) {
-	if !validateBearerToken("", "") {
-		t.Fatal("empty configured token should allow requests")
+	if validateBearerToken("", "") {
+		t.Fatal("empty configured token should reject requests")
 	}
 	if !validateBearerToken("Bearer super-secret", "super-secret") {
 		t.Fatal("configured token should accept matching bearer token")

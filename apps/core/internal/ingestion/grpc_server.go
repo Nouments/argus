@@ -237,7 +237,7 @@ func readBearerTokenFromContext(ctx context.Context) string {
 func validateBearerToken(value, configuredToken string) bool {
 	configuredToken = strings.TrimSpace(configuredToken)
 	if configuredToken == "" {
-		return true
+		return false
 	}
 	value = strings.TrimSpace(value)
 	if value == "" {

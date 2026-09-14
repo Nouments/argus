@@ -169,7 +169,7 @@ func NewServerWithIngestion(client agentpb.AgentServiceClient, conn *grpc.Client
 func validateGatewayToken(value string) bool {
 	configured := strings.TrimSpace(os.Getenv("ARGUS_GATEWAY_TOKEN"))
 	if configured == "" {
-		return true
+		return false
 	}
 	value = strings.TrimSpace(value)
 	if value == "" {
@@ -261,10 +261,18 @@ func newSessionNonce() string {
 	return hex.EncodeToString(buf)
 }
 
-func ValidateAccessToken(token string) (*sessionClaims, error) {
+func sessionSecret() (string, error) {
 	secret := strings.TrimSpace(os.Getenv("ARGUS_SESSION_SECRET"))
 	if secret == "" {
-		secret = "default-session-secret-change-me"
+		return "", fmt.Errorf("ARGUS_SESSION_SECRET is required")
+	}
+	return secret, nil
+}
+
+func ValidateAccessToken(token string) (*sessionClaims, error) {
+	secret, err := sessionSecret()
+	if err != nil {
+		return nil, err
 	}
 	parts := strings.Split(token, ".")
 	if len(parts) != 3 {
@@ -290,9 +298,9 @@ func ValidateAccessToken(token string) (*sessionClaims, error) {
 }
 
 func IssueEnrollmentToken(agentID, siteID string) (string, error) {
-	secret := strings.TrimSpace(os.Getenv("ARGUS_SESSION_SECRET"))
-	if secret == "" {
-		secret = "default-session-secret-change-me"
+	secret, err := sessionSecret()
+	if err != nil {
+		return "", err
 	}
 	claims := sessionClaims{
 		AgentID:   agentID,
@@ -312,9 +320,9 @@ func IssueEnrollmentToken(agentID, siteID string) (string, error) {
 }
 
 func IssueSessionPair(agentID, siteID string) (*sessionPair, error) {
-	secret := strings.TrimSpace(os.Getenv("ARGUS_SESSION_SECRET"))
-	if secret == "" {
-		secret = "default-session-secret-change-me"
+	secret, err := sessionSecret()
+	if err != nil {
+		return nil, err
 	}
 	now := time.Now()
 	sessionID := "sess-" + agentID + "-" + siteID + "-" + newSessionNonce()
@@ -356,6 +364,9 @@ func RotateRefreshToken(refreshToken string) (*sessionPair, error) {
 	}
 	if claims.SessionID == "" {
 		return nil, fmt.Errorf("refresh token missing session id")
+	}
+	if IsSessionRevoked(claims.SessionID) {
+		return nil, fmt.Errorf("session revoked")
 	}
 	return IssueSessionPair(claims.AgentID, claims.SiteID)
 }

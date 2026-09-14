@@ -188,6 +188,19 @@ func TestGatewayTargetForGRPC(t *testing.T) {
 	}
 }
 
+func TestResolveGatewayGRPCTargetFromOverride(t *testing.T) {
+	t.Setenv("ARGUS_GATEWAY_URL", "http://localhost:18080")
+	t.Setenv("ARGUS_GATEWAY_GRPC_URL", "localhost:18443")
+
+	got, err := resolveGatewayGRPCTarget()
+	if err != nil {
+		t.Fatalf("resolveGatewayGRPCTarget() error: %v", err)
+	}
+	if got != "localhost:18443" {
+		t.Fatalf("resolveGatewayGRPCTarget() = %q, want %q", got, "localhost:18443")
+	}
+}
+
 func TestGatewayStatusShouldFallbackOnlyForTransientFailures(t *testing.T) {
 	tests := []struct {
 		name       string
